@@ -970,6 +970,7 @@ function applyProviderPresetToProfile(profile, preset) {
       requestFormat: "google-openai",
       googleAiStudioMode: true,
       apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: /gemini/i.test(profile.model) ? profile.model : "gemini-2.0-flash",
     };
   }
 
@@ -1312,7 +1313,7 @@ async function executeProfileRequest(profile, sourceInput) {
   let requestBody = {};
 
   if (profile.providerPreset === "google") {
-    const model = normalizeGoogleModelName(profile.model || "gemini-1.5-pro");
+    const model = normalizeGoogleModelName(profile.model || "gemini-2.0-flash");
     endpoint = `${baseUrl}/chat/completions`;
     requestBody = {
       model,
@@ -2569,6 +2570,7 @@ function mountSettingsInputs(root) {
             providerPreset: "google",
             requestFormat: "google-openai",
             apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+            model: /gemini/i.test(nextDraft.model) ? nextDraft.model : "gemini-2.0-flash",
           }
         : nextDraft;
       render();
