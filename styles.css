@@ -301,6 +301,10 @@ button {
   padding: 2px 0 106px;
 }
 
+.central-settings-pane {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+}
+
 .messages-pane-moments {
   padding-top: 0;
 }
@@ -758,6 +762,158 @@ button {
   color: #8e8e93;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.central-settings-top-card,
+.central-settings-note,
+.central-settings-hero {
+  margin-bottom: 14px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
+  padding: 16px 18px;
+}
+
+.central-settings-hero-title {
+  margin-bottom: 6px;
+  color: var(--shell-text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.central-settings-hero p,
+.central-settings-active-note {
+  margin: 0;
+  color: var(--shell-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.central-settings-active-note {
+  margin-top: 10px;
+}
+
+.central-settings-top-label {
+  margin-bottom: 8px;
+  color: var(--shell-text-soft);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+
+.central-settings-top-row,
+.central-settings-model-row,
+.central-settings-password-row,
+.central-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.central-settings-profile-select,
+.central-settings-model-select {
+  flex: 1;
+}
+
+.central-settings-profile-select,
+.central-settings-mini-button,
+.central-settings-save,
+.central-settings-delete {
+  border: 0.5px solid rgba(79, 79, 79, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--shell-text);
+  padding: 11px 14px;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.central-settings-mini-button {
+  white-space: nowrap;
+}
+
+.central-settings-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border: 0.5px solid rgba(79, 79, 79, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--shell-text-soft);
+}
+
+.central-settings-eye svg {
+  width: 18px;
+  height: 18px;
+}
+
+.central-settings-section {
+  margin-bottom: 16px;
+}
+
+.api-feedback-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 12px 14px;
+  color: var(--shell-text-soft);
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.05);
+}
+
+.api-feedback-badge span:first-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.1);
+  color: var(--shell-text);
+  font-weight: 700;
+}
+
+.api-feedback-badge.is-success span:first-child {
+  background: rgba(115, 180, 128, 0.18);
+  color: #5e9f6b;
+}
+
+.api-feedback-badge.is-error span:first-child {
+  background: rgba(210, 109, 109, 0.16);
+  color: #d26d6d;
+}
+
+.central-settings-note p {
+  margin: 0;
+  color: var(--shell-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.central-settings-save,
+.central-settings-delete {
+  flex: 1;
+  min-height: 48px;
+  font-weight: 600;
+}
+
+.central-settings-save {
+  background: rgba(79, 79, 79, 0.1);
+}
+
+.central-settings-delete {
+  color: #d26d6d;
+}
+
+.central-settings-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .messages-chat-view {

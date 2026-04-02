@@ -8,12 +8,19 @@ const appState = {
   messagesView: "list",
   activeConversationId: null,
   chatView: "conversation",
+  activeApiProfileId: "",
+  apiProfileDraft: null,
   draftMessage: "",
   pendingAttachment: null,
   isVoiceMode: false,
   isReplyPending: false,
   attachmentMenuOpen: false,
   conversationTimers: [],
+  apiConnectionState: {
+    status: "idle",
+    message: "",
+  },
+  showApiKey: false,
 };
 
 const homeConfig = {
@@ -187,8 +194,22 @@ let messageSequence = 6;
 function createDefaultPersistedState() {
   return {
     appSettings: {
-      openAIApiKey: "",
-      apiModel: "gpt-4.1-mini",
+      activeApiProfileId: "openai-default",
+      apiProfiles: {
+        "openai-default": {
+          id: "openai-default",
+          name: "OpenAI",
+          providerPreset: "openai",
+          apiUrl: "https://api.openai.com/v1",
+          apiKey: "",
+          model: "gpt-4.1-mini",
+          availableModels: [],
+          googleAiStudioMode: false,
+          corsProxyUrl: "",
+          lastConnectionStatus: "idle",
+          lastConnectionMessage: "",
+        },
+      },
     },
     characterProfiles: {
       "angel-bunny": {
@@ -252,10 +273,16 @@ function loadChatState() {
     }
 
     const parsed = JSON.parse(raw);
+    const parsedProfiles = parsed.appSettings?.apiProfiles || {};
     return {
       appSettings: {
         ...defaults.appSettings,
         ...(parsed.appSettings || {}),
+        activeApiProfileId: parsed.appSettings?.activeApiProfileId || defaults.appSettings.activeApiProfileId,
+        apiProfiles: {
+          ...defaults.appSettings.apiProfiles,
+          ...parsedProfiles,
+        },
       },
       characterProfiles: {
         ...Object.fromEntries(
@@ -275,6 +302,35 @@ function loadChatState() {
     console.warn("Unable to load saved chat state:", error);
     return defaults;
   }
+}
+
+function getApiProfiles() {
+  return persistedState.appSettings.apiProfiles || {};
+}
+
+function getActiveApiProfile() {
+  const profiles = getApiProfiles();
+  return profiles[persistedState.appSettings.activeApiProfileId] || Object.values(profiles)[0] || null;
+}
+
+function saveApiProfile(profile) {
+  persistedState.appSettings.apiProfiles = {
+    ...getApiProfiles(),
+    [profile.id]: profile,
+  };
+  if (!persistedState.appSettings.activeApiProfileId) {
+    persistedState.appSettings.activeApiProfileId = profile.id;
+  }
+  saveChatState();
+}
+
+function deleteApiProfile(profileId) {
+  const profiles = { ...getApiProfiles() };
+  delete profiles[profileId];
+  persistedState.appSettings.apiProfiles = profiles;
+  const remaining = Object.values(profiles);
+  persistedState.appSettings.activeApiProfileId = remaining[0]?.id || "";
+  saveChatState();
 }
 
 function saveChatState() {
@@ -329,6 +385,14 @@ function currentProfile() {
 
 function assetPath(fileName) {
   return `${ASSET_BASE}/${fileName}`;
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }
 
 function createFallback(label, className = "") {
@@ -448,6 +512,18 @@ function iconSvg(name) {
         <rect x="4" y="5.5" width="16" height="13" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
         <circle cx="9" cy="10" r="1.4" fill="currentColor"/>
         <path d="M7 16l3.2-3.5 2.4 2.2 2.8-3 2.6 4.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `,
+    eye: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M2.8 12s3.3-5.5 9.2-5.5 9.2 5.5 9.2 5.5-3.3 5.5-9.2 5.5S2.8 12 2.8 12z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      </svg>
+    `,
+    eyeOff: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.5 4.5l17 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M5.1 7.1C3.7 8.5 2.8 10 2.8 12c0 0 3.3 5.5 9.2 5.5 1.9 0 3.5-.6 4.8-1.5M9 6.9c1-.3 2-.4 3-.4 5.9 0 9.2 5.5 9.2 5.5a15.8 15.8 0 0 1-2.2 2.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       </svg>
     `,
   };
@@ -733,23 +809,23 @@ function buildOpenAIInput(conversationId) {
 }
 
 async function callOpenAI(conversationId) {
-  const { openAIApiKey, apiModel } = persistedState.appSettings;
+  const activeApiProfile = getActiveApiProfile();
 
-  if (!openAIApiKey) {
-    throw new Error("Add an OpenAI API key in the chat settings menu first.");
+  if (!activeApiProfile?.apiKey) {
+    throw new Error("Add an API profile and key in the central Settings app first.");
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openAIApiKey}`,
-    },
-    body: JSON.stringify({
-      model: apiModel || "gpt-4.1-mini",
+  const baseUrl = String(activeApiProfile.apiUrl || "").trim().replace(/\/+$/, "");
+  const endpoint = activeApiProfile.corsProxyUrl
+    ? `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${baseUrl}/responses`
+    : `${baseUrl}/responses`;
+  const response = await fetch(
+    endpoint,
+    buildApiRequestConfig(activeApiProfile, "POST", {
+      model: activeApiProfile.model || "gpt-4.1-mini",
       input: buildOpenAIInput(conversationId),
     }),
-  });
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -900,6 +976,161 @@ function createMomentPost(characterId, text, generated = true) {
     ...(persistedState.momentsPosts || []),
   ].slice(0, 24);
   saveChatState();
+}
+
+function createBlankApiProfile(name = "") {
+  const cleanName = name || "New Profile";
+  const id = slugify(cleanName) || `profile-${Date.now()}`;
+  return {
+    id,
+    name: cleanName,
+    providerPreset: "openai",
+    apiUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    model: "",
+    availableModels: [],
+    googleAiStudioMode: false,
+    corsProxyUrl: "",
+    lastConnectionStatus: "idle",
+    lastConnectionMessage: "",
+  };
+}
+
+function applyProviderPresetToProfile(profile, preset) {
+  if (preset === "google") {
+    return {
+      ...profile,
+      providerPreset: "google",
+      googleAiStudioMode: true,
+      apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    };
+  }
+
+  if (preset === "local") {
+    return {
+      ...profile,
+      providerPreset: "local",
+      googleAiStudioMode: false,
+      apiUrl: "http://localhost:1234/v1",
+    };
+  }
+
+  return {
+    ...profile,
+    providerPreset: "openai",
+    googleAiStudioMode: false,
+    apiUrl: "https://api.openai.com/v1",
+  };
+}
+
+function ensureApiDraft() {
+  if (!appState.apiProfileDraft) {
+    const active = getActiveApiProfile();
+    appState.activeApiProfileId = active?.id || "";
+    appState.apiProfileDraft = active ? { ...active } : createBlankApiProfile();
+  }
+}
+
+function openCentralSettings(profileId = "") {
+  const targetProfile = profileId ? getApiProfiles()[profileId] : getActiveApiProfile();
+  appState.activeScreen = "central-settings";
+  appState.apiConnectionState = { status: "idle", message: "" };
+  appState.showApiKey = false;
+  appState.activeApiProfileId = targetProfile?.id || "";
+  appState.apiProfileDraft = targetProfile ? { ...targetProfile } : createBlankApiProfile();
+}
+
+function buildModelsEndpoint(profile) {
+  const rawBase = String(profile.apiUrl || "").trim();
+  const trimmedBase = rawBase.replace(/\/+$/, "");
+  return trimmedBase.endsWith("/models") ? trimmedBase : `${trimmedBase}/models`;
+}
+
+function buildApiRequestConfig(profile, method = "GET", body) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (profile.googleAiStudioMode || profile.providerPreset === "google") {
+    headers["x-goog-api-key"] = profile.apiKey;
+  } else {
+    headers.Authorization = `Bearer ${profile.apiKey}`;
+  }
+
+  return {
+    method,
+    headers,
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  };
+}
+
+async function fetchModelsForDraft() {
+  ensureApiDraft();
+  const profile = appState.apiProfileDraft;
+  if (!profile.apiUrl || !profile.apiKey) {
+    appState.apiConnectionState = {
+      status: "error",
+      message: "Add the API URL and API key before fetching models.",
+    };
+    render();
+    return;
+  }
+
+  appState.apiConnectionState = {
+    status: "loading",
+    message: "Fetching available models...",
+  };
+  render();
+
+  try {
+    const endpoint = buildModelsEndpoint(profile);
+    const targetUrl = profile.corsProxyUrl
+      ? `${profile.corsProxyUrl.replace(/\/+$/, "")}/${endpoint}`
+      : endpoint;
+    const response = await fetch(targetUrl, buildApiRequestConfig(profile));
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `Model fetch failed with ${response.status}`);
+    }
+
+    const data = await response.json();
+    const modelItems = Array.isArray(data.data)
+      ? data.data
+      : Array.isArray(data.models)
+        ? data.models
+        : [];
+    const availableModels = modelItems
+      .map((item) => item.id || item.name || item.model)
+      .filter(Boolean);
+
+    appState.apiProfileDraft = {
+      ...profile,
+      availableModels,
+      model: profile.model || availableModels[0] || "",
+      lastConnectionStatus: "success",
+      lastConnectionMessage: availableModels.length ? "Connection successful. Models fetched." : "Connection succeeded but no models were returned.",
+    };
+    appState.apiConnectionState = {
+      status: "success",
+      message: appState.apiProfileDraft.lastConnectionMessage,
+    };
+  } catch (error) {
+    const message = /cors/i.test(String(error.message || ""))
+      ? "Fetch failed. This may be a CORS issue. Add a proxy URL or disable browser security for local testing."
+      : error.message || "Unable to fetch models.";
+    appState.apiConnectionState = {
+      status: "error",
+      message,
+    };
+    appState.apiProfileDraft = {
+      ...profile,
+      lastConnectionStatus: "error",
+      lastConnectionMessage: message,
+    };
+  }
+
+  render();
 }
 
 function maybeSimulateCharacterActivity() {
@@ -1279,6 +1510,147 @@ function renderSettingsTab() {
   `;
 }
 
+function renderConnectionBadge() {
+  const state = appState.apiConnectionState;
+  if (state.status === "success") {
+    return `<div class="api-feedback-badge is-success"><span>✓</span><span>${state.message}</span></div>`;
+  }
+  if (state.status === "error") {
+    return `<div class="api-feedback-badge is-error"><span>!</span><span>${state.message}</span></div>`;
+  }
+  if (state.status === "loading") {
+    return `<div class="api-feedback-badge"><span>…</span><span>${state.message}</span></div>`;
+  }
+  return "";
+}
+
+function renderCentralSettingsScreen() {
+  ensureApiDraft();
+  const draft = appState.apiProfileDraft;
+  const profiles = Object.values(getApiProfiles());
+  const modelOptions = draft.availableModels || [];
+  const activeProfile = getActiveApiProfile();
+
+  return `
+    <div class="phone-shell">
+      <div class="shell-inner">
+        ${renderStatusBar()}
+        <div class="messages-app">
+          <div class="messages-pane central-settings-pane">
+            <div class="messages-header">
+              <button type="button" class="messages-back" data-action="go-home" aria-label="Back to home">
+                ${iconSvg("back")}
+              </button>
+              <div class="messages-header-title">AI Settings</div>
+              <div class="messages-header-spacer"></div>
+            </div>
+
+            <section class="central-settings-hero">
+              <div class="central-settings-hero-title">This is the engine for your love-chat app.</div>
+              <p>The active profile below powers every AI character, every reply, and every generated Moment across the app.</p>
+            </section>
+
+            <section class="central-settings-top-card">
+              <div class="central-settings-top-label">Active Profile</div>
+              <div class="central-settings-top-row">
+                <select class="central-settings-profile-select" data-role="active-api-profile-select">
+                  ${profiles
+                    .map(
+                      (profile) =>
+                        `<option value="${profile.id}" ${profile.id === (appState.activeApiProfileId || persistedState.appSettings.activeApiProfileId) ? "selected" : ""}>${profile.name}</option>`,
+                    )
+                    .join("")}
+                </select>
+                <button type="button" class="central-settings-mini-button" data-action="new-api-profile">New</button>
+              </div>
+              <div class="central-settings-active-note">
+                ${activeProfile?.name || "No active profile selected"} will be used automatically when a character sends or replies.
+              </div>
+            </section>
+
+            <section class="central-settings-section">
+              <div class="chat-settings-section-header">
+                ${settingsSectionIcon("api")}
+                <h3>API Profile Management</h3>
+              </div>
+              <div class="chat-settings-card">
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">Profile Name</span>
+                  <input type="text" class="chat-settings-text-input" data-role="api-profile-name-input" value="${escapeAttribute(draft.name)}" placeholder="OpenAI, Gemini Pro, Local LLM..." />
+                </label>
+                <label class="chat-settings-row">
+                  <span class="chat-settings-row-copy">
+                    <span class="chat-settings-row-title">Provider Preset</span>
+                    <span class="chat-settings-row-detail">Auto-fills common endpoint shapes.</span>
+                  </span>
+                  <select class="chat-settings-inline-select" data-role="provider-preset-select">
+                    <option value="openai" ${draft.providerPreset === "openai" ? "selected" : ""}>OpenAI</option>
+                    <option value="google" ${draft.providerPreset === "google" ? "selected" : ""}>Google AI Studio</option>
+                    <option value="local" ${draft.providerPreset === "local" ? "selected" : ""}>Local LLM</option>
+                  </select>
+                </label>
+                ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Formats the endpoint to the Google-compatible OpenAI route.")}
+              </div>
+            </section>
+
+            <section class="central-settings-section">
+              <div class="chat-settings-section-header">
+                ${settingsSectionIcon("memory")}
+                <h3>Connection</h3>
+              </div>
+              <div class="chat-settings-card">
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">API URL</span>
+                  <span class="chat-settings-row-detail">For many providers, the URL should end in /v1.</span>
+                  <input type="text" class="chat-settings-text-input" data-role="api-url-input" value="${escapeAttribute(draft.apiUrl)}" placeholder="https://api.openai.com/v1" />
+                </label>
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">API Key</span>
+                  <div class="central-settings-password-row">
+                    <input type="${appState.showApiKey ? "text" : "password"}" class="chat-settings-text-input" data-role="api-key-input" value="${escapeAttribute(draft.apiKey)}" placeholder="sk-..." />
+                    <button type="button" class="central-settings-eye" data-action="toggle-api-key-visibility" aria-label="Toggle API key visibility">
+                      ${iconSvg(appState.showApiKey ? "eyeOff" : "eye")}
+                    </button>
+                  </div>
+                </label>
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">Model Selector</span>
+                  <span class="chat-settings-row-detail">Fetch once, then all characters can use this engine immediately.</span>
+                  <div class="central-settings-model-row">
+                    <select class="chat-settings-inline-select central-settings-model-select" data-role="api-model-select">
+                      <option value="">${modelOptions.length ? "Select a model" : "Fetch models first"}</option>
+                      ${modelOptions
+                        .map((model) => `<option value="${escapeAttribute(model)}" ${draft.model === model ? "selected" : ""}>${model}</option>`)
+                        .join("")}
+                    </select>
+                    <button type="button" class="central-settings-mini-button" data-action="fetch-models">Fetch Models</button>
+                  </div>
+                </label>
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">CORS Proxy URL</span>
+                  <span class="chat-settings-row-detail">Optional. Use this if your browser blocks direct model fetches.</span>
+                  <input type="text" class="chat-settings-text-input" data-role="cors-proxy-input" value="${escapeAttribute(draft.corsProxyUrl)}" placeholder="https://your-proxy.example.com" />
+                </label>
+              </div>
+            </section>
+
+            ${renderConnectionBadge()}
+
+            <section class="central-settings-note">
+              <p>If model fetching fails with CORS in the browser, add a proxy URL here or disable browser security for local testing.</p>
+            </section>
+
+            <section class="central-settings-actions">
+              <button type="button" class="central-settings-save" data-action="save-api-profile">Save Profile</button>
+              <button type="button" class="central-settings-delete" data-action="delete-api-profile" ${profiles.length <= 1 ? "disabled" : ""}>Delete Profile</button>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderTypingBubble(profile) {
   return `
     <div class="message-row message-row--ai">
@@ -1424,7 +1796,6 @@ function renderToggleField(label, role, checked, helper = "", destructive = fals
 
 function renderChatSettingsScreen(conversationId) {
   const profile = getProfile(conversationId);
-  const { openAIApiKey, apiModel } = persistedState.appSettings;
   const wallpaperStyle = profile.chatWallpaper
     ? `style="background-image:url('${escapeAttribute(profile.chatWallpaper)}'); background-size:cover; background-position:center;"`
     : "";
@@ -1550,17 +1921,16 @@ function renderChatSettingsScreen(conversationId) {
           <section class="chat-settings-section">
             <div class="chat-settings-section-header">
               ${settingsSectionIcon("api")}
-              <h3>Model & API</h3>
+              <h3>Active API Profile</h3>
             </div>
             <div class="chat-settings-card">
-              <label class="chat-settings-stack-row">
-                <span class="chat-settings-row-title">OpenAI API Key</span>
-                <input type="password" class="chat-settings-text-input" data-role="api-key-input" value="${escapeAttribute(openAIApiKey)}" placeholder="sk-..." />
-              </label>
-              <label class="chat-settings-stack-row">
-                <span class="chat-settings-row-title">Model</span>
-                <input type="text" class="chat-settings-text-input" data-role="api-model-input" value="${escapeAttribute(apiModel)}" />
-              </label>
+              <button type="button" class="chat-settings-row chat-settings-action" data-action="open-central-settings">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">${getActiveApiProfile()?.name || "No active profile"}</span>
+                  <span class="chat-settings-row-detail">${getActiveApiProfile()?.apiUrl || "Open central Settings to choose the engine for all characters."} All love-chat replies use this active AI profile.</span>
+                </span>
+                <span class="contacts-chevron">></span>
+              </button>
             </div>
           </section>
         </div>
@@ -1728,7 +2098,15 @@ function renderMessagesScreen() {
 }
 
 function renderApp() {
-  return appState.activeScreen === "messages" ? renderMessagesScreen() : renderHomeScreen();
+  if (appState.activeScreen === "messages") {
+    return renderMessagesScreen();
+  }
+
+  if (appState.activeScreen === "central-settings") {
+    return renderCentralSettingsScreen();
+  }
+
+  return renderHomeScreen();
 }
 
 function mountImageFallbacks(root) {
@@ -1784,6 +2162,13 @@ function mountComposer(root) {
 }
 
 function mountSettingsInputs(root) {
+  const activeApiProfileSelect = root.querySelector("[data-role='active-api-profile-select']");
+  const apiProfileNameInput = root.querySelector("[data-role='api-profile-name-input']");
+  const providerPresetSelect = root.querySelector("[data-role='provider-preset-select']");
+  const googleModeToggle = root.querySelector("[data-role='google-mode-toggle']");
+  const apiUrlInput = root.querySelector("[data-role='api-url-input']");
+  const corsProxyInput = root.querySelector("[data-role='cors-proxy-input']");
+  const apiModelSelect = root.querySelector("[data-role='api-model-select']");
   const worldbookInput = root.querySelector("[data-role='worldbook-input']");
   const memoryCountInput = root.querySelector("[data-role='memory-count-input']");
   const memoryManagementToggle = root.querySelector("[data-role='memory-management-toggle']");
@@ -1796,7 +2181,78 @@ function mountSettingsInputs(root) {
   const blockToggle = root.querySelector("[data-role='block-toggle']");
   const nicknameInput = root.querySelector("[data-role='nickname-input']");
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
-  const apiModelInput = root.querySelector("[data-role='api-model-input']");
+
+  if (activeApiProfileSelect) {
+    activeApiProfileSelect.addEventListener("change", (event) => {
+      const nextProfile = getApiProfiles()[event.target.value];
+      if (!nextProfile) {
+        return;
+      }
+      appState.activeApiProfileId = nextProfile.id;
+      appState.apiProfileDraft = { ...nextProfile };
+      appState.apiConnectionState = {
+        status: nextProfile.lastConnectionStatus || "idle",
+        message: nextProfile.lastConnectionMessage || "",
+      };
+      render();
+    });
+  }
+
+  if (apiProfileNameInput) {
+    apiProfileNameInput.addEventListener("input", (event) => {
+      ensureApiDraft();
+      appState.apiProfileDraft = {
+        ...appState.apiProfileDraft,
+        name: event.target.value,
+      };
+    });
+  }
+
+  if (providerPresetSelect) {
+    providerPresetSelect.addEventListener("change", (event) => {
+      ensureApiDraft();
+      appState.apiProfileDraft = applyProviderPresetToProfile(appState.apiProfileDraft, event.target.value);
+      render();
+    });
+  }
+
+  if (googleModeToggle) {
+    googleModeToggle.addEventListener("change", (event) => {
+      ensureApiDraft();
+      const nextDraft = {
+        ...appState.apiProfileDraft,
+        googleAiStudioMode: event.target.checked,
+      };
+      appState.apiProfileDraft = event.target.checked
+        ? {
+            ...nextDraft,
+            providerPreset: "google",
+            apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+          }
+        : nextDraft;
+      render();
+    });
+  }
+
+  if (apiUrlInput) {
+    apiUrlInput.addEventListener("input", (event) => {
+      ensureApiDraft();
+      appState.apiProfileDraft = {
+        ...appState.apiProfileDraft,
+        apiUrl: event.target.value,
+      };
+    });
+  }
+
+  if (corsProxyInput) {
+    corsProxyInput.addEventListener("input", (event) => {
+      ensureApiDraft();
+      appState.apiProfileDraft = {
+        ...appState.apiProfileDraft,
+        corsProxyUrl: event.target.value,
+      };
+    });
+  }
 
   if (memoryCountInput) {
     memoryCountInput.addEventListener("input", (event) => {
@@ -1868,15 +2324,24 @@ function mountSettingsInputs(root) {
 
   if (apiKeyInput) {
     apiKeyInput.addEventListener("input", (event) => {
-      persistedState.appSettings.openAIApiKey = event.target.value;
-      saveChatState();
+      if (appState.activeScreen === "central-settings") {
+        ensureApiDraft();
+        appState.apiProfileDraft = {
+          ...appState.apiProfileDraft,
+          apiKey: event.target.value,
+        };
+        return;
+      }
     });
   }
 
-  if (apiModelInput) {
-    apiModelInput.addEventListener("input", (event) => {
-      persistedState.appSettings.apiModel = event.target.value;
-      saveChatState();
+  if (apiModelSelect) {
+    apiModelSelect.addEventListener("change", (event) => {
+      ensureApiDraft();
+      appState.apiProfileDraft = {
+        ...appState.apiProfileDraft,
+        model: event.target.value,
+      };
     });
   }
 }
@@ -1940,6 +2405,12 @@ function handleAction(action, button) {
     appState.draftMessage = "";
     appState.pendingAttachment = null;
     appState.attachmentMenuOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "open-central-settings") {
+    openCentralSettings();
     render();
     return;
   }
@@ -2032,6 +2503,75 @@ function handleAction(action, button) {
     setConversation(conversationId, []);
     appState.isReplyPending = false;
     render();
+    return;
+  }
+
+  if (action === "toggle-api-key-visibility") {
+    appState.showApiKey = !appState.showApiKey;
+    render();
+    return;
+  }
+
+  if (action === "new-api-profile") {
+    const profile = createBlankApiProfile(`Profile ${Object.keys(getApiProfiles()).length + 1}`);
+    appState.activeApiProfileId = "";
+    appState.apiProfileDraft = profile;
+    appState.apiConnectionState = { status: "idle", message: "" };
+    render();
+    return;
+  }
+
+  if (action === "save-api-profile") {
+    ensureApiDraft();
+    const draft = {
+      ...appState.apiProfileDraft,
+      id: appState.apiProfileDraft.id || slugify(appState.apiProfileDraft.name) || `profile-${Date.now()}`,
+      name: appState.apiProfileDraft.name?.trim() || "Untitled Profile",
+    };
+    const currentSelectedId = appState.activeApiProfileId;
+    const nextId = currentSelectedId && currentSelectedId !== draft.id && !getApiProfiles()[draft.id] ? draft.id : draft.id;
+    const normalizedId = slugify(draft.name) || nextId;
+    const previousId = currentSelectedId && getApiProfiles()[currentSelectedId] ? currentSelectedId : draft.id;
+    if (previousId !== normalizedId && getApiProfiles()[previousId] && !getApiProfiles()[normalizedId]) {
+      deleteApiProfile(previousId);
+    }
+    const finalProfile = {
+      ...draft,
+      id: normalizedId,
+      lastConnectionStatus: appState.apiConnectionState.status === "idle" ? draft.lastConnectionStatus : appState.apiConnectionState.status,
+      lastConnectionMessage: appState.apiConnectionState.message || draft.lastConnectionMessage,
+    };
+    saveApiProfile(finalProfile);
+    persistedState.appSettings.activeApiProfileId = finalProfile.id;
+    saveChatState();
+    appState.activeApiProfileId = finalProfile.id;
+    appState.apiProfileDraft = { ...finalProfile };
+    appState.apiConnectionState = {
+      status: finalProfile.lastConnectionStatus || "success",
+      message: finalProfile.lastConnectionMessage || "Profile saved.",
+    };
+    render();
+    return;
+  }
+
+  if (action === "delete-api-profile") {
+    ensureApiDraft();
+    const profiles = Object.values(getApiProfiles());
+    if (profiles.length <= 1) {
+      return;
+    }
+    deleteApiProfile(appState.activeApiProfileId || appState.apiProfileDraft.id);
+    const nextActive = getActiveApiProfile();
+    appState.activeApiProfileId = nextActive?.id || "";
+    appState.apiProfileDraft = nextActive ? { ...nextActive } : createBlankApiProfile();
+    appState.apiConnectionState = { status: "idle", message: "" };
+    render();
+    return;
+  }
+
+  if (action === "fetch-models") {
+    fetchModelsForDraft();
+    return;
   }
 }
 
@@ -2042,6 +2582,12 @@ function wireInteractions(root) {
 
       if (appId === "messages") {
         enterMessagesScreen();
+        render();
+        return;
+      }
+
+      if (appId === "settings") {
+        openCentralSettings();
         render();
         return;
       }
