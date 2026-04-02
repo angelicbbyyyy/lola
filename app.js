@@ -106,7 +106,7 @@ function renderDock() {
                 aria-label="${app.label}"
                 class="dock-button active:opacity-70 active:scale-95 transition-all duration-100"
               >
-                <span class="icon-frame soft-icon">
+                <span class="icon-frame soft-icon rounded-[18px]">
                   ${imageMarkup(app.icon, `${app.label} dock icon`, "h-full w-full", app.label.slice(0, 2))}
                 </span>
               </button>
