@@ -817,24 +817,32 @@ async function callOpenAI(conversationId) {
   }
 
   const baseUrl = String(activeApiProfile.apiUrl || "").trim().replace(/\/+$/, "");
-  const endpointPath =
-    activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic"
-      ? "messages"
-      : "chat/completions";
-  const endpoint = activeApiProfile.corsProxyUrl
-    ? `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${baseUrl}/${endpointPath}`
-    : `${baseUrl}/${endpointPath}`;
-  const requestBody =
-    activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic"
-      ? {
-          model: activeApiProfile.model || "claude-3-5-sonnet-latest",
-          max_tokens: 1024,
-          ...buildAnthropicMessages(conversationId),
-        }
-      : {
-          model: activeApiProfile.model || "gpt-4.1-mini",
-          messages: buildOpenAICompatibleMessages(conversationId),
-        };
+  let endpoint = "";
+  let requestBody = {};
+
+  if (activeApiProfile.requestFormat === "google-native" || activeApiProfile.providerPreset === "google") {
+    const model = activeApiProfile.model || "gemini-1.5-pro";
+    endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
+    requestBody = buildGoogleMessages(conversationId);
+  } else if (activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic") {
+    endpoint = `${baseUrl}/messages`;
+    requestBody = {
+      model: activeApiProfile.model || "claude-3-5-sonnet-latest",
+      max_tokens: 1024,
+      ...buildAnthropicMessages(conversationId),
+    };
+  } else {
+    endpoint = `${baseUrl}/chat/completions`;
+    requestBody = {
+      model: activeApiProfile.model || "gpt-4.1-mini",
+      messages: buildOpenAICompatibleMessages(conversationId),
+    };
+  }
+
+  if (activeApiProfile.corsProxyUrl) {
+    endpoint = `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${endpoint}`;
+  }
+
   const response = await fetch(endpoint, buildApiRequestConfig(activeApiProfile, "POST", requestBody));
 
   if (!response.ok) {
@@ -1005,9 +1013,9 @@ function applyProviderPresetToProfile(profile, preset) {
     return {
       ...profile,
       providerPreset: "google",
-      requestFormat: "openai-chat",
+      requestFormat: "google-native",
       googleAiStudioMode: true,
-      apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      apiUrl: "https://generativelanguage.googleapis.com/v1beta",
     };
   }
 
@@ -1164,7 +1172,58 @@ function buildAnthropicMessages(conversationId) {
   };
 }
 
+function buildGoogleMessages(conversationId) {
+  const input = buildOpenAIInput(conversationId);
+  const systemItem = input.find((item) => item.role === "system");
+  const contents = [];
+
+  input
+    .filter((item) => item.role !== "system")
+    .forEach((item) => {
+      const parts = item.content.map((entry) => {
+        if (entry.type === "input_image") {
+          const [header, data] = String(entry.image_url || "").split(",");
+          const mediaTypeMatch = header.match(/data:(.*?);base64/);
+          return {
+            inline_data: {
+              mime_type: mediaTypeMatch?.[1] || "image/png",
+              data: data || "",
+            },
+          };
+        }
+
+        return {
+          text: entry.text,
+        };
+      });
+
+      contents.push({
+        role: item.role === "assistant" ? "model" : "user",
+        parts,
+      });
+    });
+
+  return {
+    system_instruction: systemItem?.content?.[0]?.text
+      ? {
+          parts: [{ text: systemItem.content[0].text }],
+        }
+      : undefined,
+    contents,
+  };
+}
+
 function extractAssistantText(data, profile) {
+  if (profile.requestFormat === "google-native" || profile.providerPreset === "google") {
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const text = parts
+      .map((item) => item.text || "")
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+    return text;
+  }
+
   if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     const textParts = (data.content || [])
       .filter((item) => item.type === "text" && item.text)
@@ -1768,7 +1827,7 @@ function renderCentralSettingsScreen() {
                     <option value="local" ${draft.providerPreset === "local" ? "selected" : ""}>Local LLM</option>
                   </select>
                 </label>
-                ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Formats the endpoint to the Google-compatible OpenAI route.")}
+                ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Uses Gemini's native generateContent route with x-goog-api-key.")}
               </div>
             </section>
 
@@ -1780,7 +1839,7 @@ function renderCentralSettingsScreen() {
               <div class="chat-settings-card">
                 <label class="chat-settings-stack-row">
                   <span class="chat-settings-row-title">API URL</span>
-                  <span class="chat-settings-row-detail">OpenAI-style providers usually end in /v1. Anthropic uses /v1. Google mode auto-formats its own endpoint.</span>
+                  <span class="chat-settings-row-detail">OpenAI-style providers usually end in /v1. Anthropic uses /v1. Google mode uses the native Gemini base URL automatically.</span>
                   <input type="text" class="chat-settings-text-input" data-role="api-url-input" value="${escapeAttribute(draft.apiUrl)}" placeholder="https://api.openai.com/v1" />
                 </label>
                 <label class="chat-settings-stack-row">
