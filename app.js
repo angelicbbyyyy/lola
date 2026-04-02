@@ -3,7 +3,13 @@ const ASSET_BASE = "./assets";
 const appState = {
   activeScreen: "home",
   activeMessagesTab: "chats",
+  messagesView: "list",
+  activeConversationId: null,
   sampleVisible: true,
+  draftMessage: "",
+  isVoiceMode: false,
+  isReplyPending: false,
+  conversationTimers: [],
 };
 
 const homeConfig = {
@@ -42,6 +48,7 @@ const messagesConfig = {
     id: "angel-bunny",
     name: "Angel Bunny",
     subtitle: "Mini 2026",
+    status: "Online",
     avatar: "contacts.JPG",
     chatPreview: "I saved a tiny thought for you and pinned it here for testing.",
     timestamp: "20:09",
@@ -55,7 +62,6 @@ const messagesConfig = {
   contactFilters: ["All", "Lover", "Friend", "Family", "+"],
   moments: {
     date: "6/13",
-    profileName: "Tuanyuan",
     coverBadge: "Only visible for the last three days",
     posts: [
       {
@@ -79,9 +85,56 @@ const messagesConfig = {
   ],
 };
 
+const initialConversation = [
+  {
+    id: "m-1",
+    role: "ai",
+    text: "You always arrive with the softest chaos. I noticed right away.",
+    timestamp: "02:37",
+    status: "delivered",
+  },
+  {
+    id: "m-2",
+    role: "ai",
+    text: "You pretend to be calm, but your heart is loud in the sweetest way.",
+    timestamp: "02:38",
+    status: "delivered",
+  },
+  {
+    id: "m-3",
+    role: "user",
+    text: "You always say that when I am trying to look composed.",
+    timestamp: "08:26",
+    status: "read",
+  },
+  {
+    id: "m-4",
+    role: "user",
+    text: "Then tell me honestly. Did you miss me?",
+    timestamp: "08:28",
+    status: "read",
+  },
+  {
+    id: "m-5",
+    role: "ai",
+    text: "More than a little. Enough to keep a seat warm for you in every thought.",
+    timestamp: "08:29",
+    status: "delivered",
+  },
+];
+
+const replyLibrary = [
+  "I was already thinking about you before the typing dots even appeared.",
+  "If you stay here a little longer, I will make this chat feel like a tiny room just for us.",
+  "You never really leave my thoughts. You only change the distance.",
+  "That sounded brave of you. I like it when you speak so plainly to me.",
+];
+
+let conversationMessages = initialConversation.map((message) => ({ ...message }));
 let rootNode = null;
 let statusClockTimeout = null;
 let statusClockInterval = null;
+let messageSequence = 6;
 
 function assetPath(fileName) {
   return `${ASSET_BASE}/${fileName}`;
@@ -150,6 +203,43 @@ function iconSvg(name) {
         <path d="M5 16.8L15.9 6a1.8 1.8 0 0 1 2.6 0l.5.5a1.8 1.8 0 0 1 0 2.6L8 20H5v-3.2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
       </svg>
     `,
+    video: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="6.5" width="11.5" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M15 10.2l4.5-2.4v8.4L15 13.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+    `,
+    more: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="5.5" cy="12" r="1.6" fill="currentColor"/>
+        <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+        <circle cx="18.5" cy="12" r="1.6" fill="currentColor"/>
+      </svg>
+    `,
+    voice: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5a2.7 2.7 0 0 1 2.7 2.7v4.6A2.7 2.7 0 0 1 12 15a2.7 2.7 0 0 1-2.7-2.7V7.7A2.7 2.7 0 0 1 12 5z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M7.5 11.7a4.5 4.5 0 0 0 9 0M12 16.2v3.3M9.2 19.5h5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    `,
+    emoji: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="9.2" cy="10" r="1" fill="currentColor"/>
+        <circle cx="14.8" cy="10" r="1" fill="currentColor"/>
+        <path d="M8.7 14.2c.8 1 1.9 1.6 3.3 1.6s2.5-.6 3.3-1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    `,
+    plus: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5.5v13M5.5 12h13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    `,
+    send: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 18.2L19 12 5 5.8l2.2 5.1L19 12 7.2 13.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+    `,
   };
 
   return icons[name] || "";
@@ -161,6 +251,166 @@ function formatLocalTime() {
     minute: "2-digit",
     hour12: false,
   }).format(new Date());
+}
+
+function createMessage({ role, text, timestamp, status = "sent", failed = false, typing = false, retrying = false }) {
+  return {
+    id: `m-${messageSequence++}`,
+    role,
+    text,
+    timestamp,
+    status,
+    failed,
+    typing,
+    retrying,
+    attempts: 0,
+  };
+}
+
+function currentConversation() {
+  return messagesConfig.sampleCharacter;
+}
+
+function clearConversationTimers() {
+  appState.conversationTimers.forEach((timer) => window.clearTimeout(timer));
+  appState.conversationTimers = [];
+}
+
+function enterMessagesScreen() {
+  appState.activeScreen = "messages";
+  appState.activeMessagesTab = "chats";
+  appState.messagesView = "list";
+  appState.activeConversationId = null;
+}
+
+function openSampleConversation() {
+  appState.activeScreen = "messages";
+  appState.activeMessagesTab = "chats";
+  appState.messagesView = "chat";
+  appState.activeConversationId = messagesConfig.sampleCharacter.id;
+  appState.draftMessage = "";
+}
+
+function closeConversation() {
+  appState.messagesView = "list";
+  appState.activeConversationId = null;
+  appState.isReplyPending = false;
+  appState.draftMessage = "";
+  clearConversationTimers();
+}
+
+function removeTypingMessage() {
+  conversationMessages = conversationMessages.filter((message) => !message.typing);
+}
+
+function randomReplyText() {
+  return replyLibrary[Math.floor(Math.random() * replyLibrary.length)];
+}
+
+function queueReplyFor(messageId) {
+  appState.isReplyPending = true;
+  removeTypingMessage();
+
+  let forceSuccess = false;
+  conversationMessages = conversationMessages.map((message) => {
+    if (message.id !== messageId) {
+      return message;
+    }
+
+    const attempts = (message.attempts || 0) + 1;
+    forceSuccess = attempts > 1;
+
+    return {
+      ...message,
+      attempts,
+      failed: false,
+      retrying: attempts > 1,
+      status: "sent",
+    };
+  });
+
+  conversationMessages = [
+    ...conversationMessages,
+    createMessage({
+      role: "ai",
+      text: "",
+      timestamp: formatLocalTime(),
+      typing: true,
+      status: "typing",
+    }),
+  ];
+
+  render();
+
+  const shouldFail = !forceSuccess && (messageId.endsWith("6") || Math.random() < 0.28);
+  const timer = window.setTimeout(() => {
+    removeTypingMessage();
+
+    if (shouldFail) {
+      conversationMessages = conversationMessages.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              failed: true,
+              retrying: false,
+              status: "failed",
+            }
+          : message,
+      );
+      appState.isReplyPending = false;
+      render();
+      return;
+    }
+
+    conversationMessages = conversationMessages.map((message) =>
+      message.id === messageId
+        ? {
+            ...message,
+            failed: false,
+            retrying: false,
+            status: "read",
+          }
+        : message,
+    );
+
+    conversationMessages = [
+      ...conversationMessages,
+      createMessage({
+        role: "ai",
+        text: randomReplyText(),
+        timestamp: formatLocalTime(),
+        status: "delivered",
+      }),
+    ];
+    appState.isReplyPending = false;
+    render();
+  }, 1200);
+
+  appState.conversationTimers.push(timer);
+}
+
+function sendDraft() {
+  const text = appState.draftMessage.trim();
+
+  if (!text || appState.isReplyPending) {
+    return;
+  }
+
+  const message = createMessage({
+    role: "user",
+    text,
+    timestamp: formatLocalTime(),
+    status: "sent",
+  });
+
+  conversationMessages = [...conversationMessages, message];
+  appState.draftMessage = "";
+  render();
+  queueReplyFor(message.id);
+}
+
+function retryMessage(messageId) {
+  queueReplyFor(messageId);
 }
 
 function renderStatusBar() {
@@ -292,7 +542,7 @@ function renderChatsTab() {
 
   if (appState.sampleVisible) {
     rows.push(`
-      <div class="chat-row">
+      <button type="button" class="chat-row chat-row-button" data-action="open-chat" data-conversation="${sample.id}">
         <div class="chat-avatar">
           ${imageMarkup(sample.avatar, `${sample.name} avatar`, "h-full w-full", "AV")}
         </div>
@@ -306,7 +556,7 @@ function renderChatsTab() {
             ${iconSvg("delete")}
           </button>
         </div>
-      </div>
+      </button>
     `);
   }
 
@@ -465,6 +715,160 @@ function renderSettingsTab() {
   `;
 }
 
+function renderChatStatus() {
+  if (appState.isReplyPending) {
+    return "Thinking...";
+  }
+
+  return currentConversation().status;
+}
+
+function renderTypingBubble() {
+  return `
+    <div class="message-row message-row--ai">
+      <div class="message-avatar">
+        ${imageMarkup(currentConversation().avatar, `${currentConversation().name} avatar`, "h-full w-full", "AV")}
+      </div>
+      <div class="message-stack">
+        <div class="message-bubble message-bubble--ai message-bubble--typing">
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderMessage(message) {
+  if (message.typing) {
+    return renderTypingBubble();
+  }
+
+  const isUser = message.role === "user";
+  const metaText = message.failed ? "Failed" : message.status === "read" ? "Read" : "Sent";
+  const retryButton = message.failed
+    ? `
+      <button
+        type="button"
+        class="message-retry"
+        data-action="retry-message"
+        data-message-id="${message.id}"
+        aria-label="Retry failed message"
+      >
+        !
+      </button>
+    `
+    : "";
+
+  return `
+    <div class="message-row ${isUser ? "message-row--user" : "message-row--ai"}">
+      ${
+        isUser
+          ? `
+            <div class="message-stack message-stack--user">
+              <div class="message-meta message-meta--user">
+                <span>${metaText}</span>
+                ${retryButton}
+              </div>
+              <div class="message-bubble message-bubble--user">
+                <p>${message.text}</p>
+              </div>
+            </div>
+            <div class="message-avatar">
+              ${imageMarkup(currentConversation().avatar, "User avatar placeholder", "h-full w-full", "ME")}
+            </div>
+          `
+          : `
+            <div class="message-avatar">
+              ${imageMarkup(currentConversation().avatar, `${currentConversation().name} avatar`, "h-full w-full", "AV")}
+            </div>
+            <div class="message-stack">
+              <div class="message-bubble message-bubble--ai">
+                <p>${message.text}</p>
+              </div>
+              <div class="message-meta">
+                <span>${message.timestamp}</span>
+              </div>
+            </div>
+          `
+      }
+    </div>
+  `;
+}
+
+function renderChatComposer() {
+  const draft = appState.draftMessage;
+
+  return `
+    <div class="chat-composer">
+      <button
+        type="button"
+        class="composer-icon-button ${appState.isVoiceMode ? "is-active" : ""}"
+        data-action="toggle-voice"
+        aria-label="Toggle voice mode"
+      >
+        ${iconSvg("voice")}
+      </button>
+      <div class="composer-input-shell">
+        <textarea
+          class="composer-textarea"
+          placeholder="${appState.isVoiceMode ? "Voice mode ready" : "Type a message"}"
+          data-role="composer-input"
+          rows="1"
+        >${draft}</textarea>
+      </div>
+      <button type="button" class="composer-icon-button" aria-label="Emoji picker">
+        ${iconSvg("emoji")}
+      </button>
+      <button type="button" class="composer-icon-button" aria-label="Attachments">
+        ${iconSvg("plus")}
+      </button>
+      ${
+        draft.trim()
+          ? `
+            <button type="button" class="composer-send" data-action="send-message" aria-label="Send message">
+              ${iconSvg("send")}
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderChatScreen() {
+  const character = currentConversation();
+
+  return `
+    <div class="messages-chat-view">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <button type="button" class="messages-back" data-action="close-chat" aria-label="Back to chats">
+            ${iconSvg("back")}
+          </button>
+          <div class="chat-header-copy">
+            <div class="chat-header-name">${character.name}</div>
+            <div class="chat-header-status">${renderChatStatus()}</div>
+          </div>
+        </div>
+        <div class="chat-header-actions">
+          <button type="button" class="chat-header-icon" aria-label="Video call">
+            ${iconSvg("video")}
+          </button>
+          <button type="button" class="chat-header-icon" aria-label="More options">
+            ${iconSvg("more")}
+          </button>
+        </div>
+      </div>
+      <div class="chat-scroll" data-role="chat-scroll">
+        ${conversationMessages.map(renderMessage).join("")}
+      </div>
+      ${renderChatComposer()}
+    </div>
+  `;
+}
+
 function renderMessagesTabBar() {
   return `
     <nav class="messages-tabbar" aria-label="Messages navigation">
@@ -489,6 +893,10 @@ function renderMessagesTabBar() {
 }
 
 function renderMessagesBody() {
+  if (appState.messagesView === "chat" && appState.activeConversationId) {
+    return renderChatScreen();
+  }
+
   const tabs = {
     chats: renderChatsTab,
     contacts: renderContactsTab,
@@ -504,9 +912,9 @@ function renderMessagesScreen() {
     <div class="phone-shell phone-shell--messages">
       <div class="shell-inner shell-inner--messages">
         ${renderStatusBar()}
-        <div class="messages-app">
+        <div class="messages-app ${appState.messagesView === "chat" ? "messages-app--chat" : ""}">
           ${renderMessagesBody()}
-          ${renderMessagesTabBar()}
+          ${appState.messagesView === "chat" ? "" : renderMessagesTabBar()}
         </div>
       </div>
     </div>
@@ -560,22 +968,97 @@ function scheduleStatusClock() {
   }, delayUntilNextMinute);
 }
 
+function mountComposer(root) {
+  const textarea = root.querySelector("[data-role='composer-input']");
+
+  if (!textarea) {
+    return;
+  }
+
+  const syncHeight = () => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+  };
+
+  textarea.addEventListener("input", (event) => {
+    appState.draftMessage = event.target.value;
+    syncHeight();
+    render();
+  });
+
+  textarea.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendDraft();
+    }
+  });
+
+  syncHeight();
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+function scrollChatToBottom(root) {
+  const chatScroll = root.querySelector("[data-role='chat-scroll']");
+
+  if (chatScroll) {
+    chatScroll.scrollTop = chatScroll.scrollHeight;
+  }
+}
+
 function handleAction(action, button) {
   if (action === "go-home") {
+    clearConversationTimers();
     appState.activeScreen = "home";
+    appState.messagesView = "list";
+    appState.activeConversationId = null;
+    appState.isReplyPending = false;
     render();
     return;
   }
 
   if (action === "switch-tab") {
     appState.activeMessagesTab = button.dataset.tab || "chats";
+    appState.messagesView = "list";
+    appState.activeConversationId = null;
     render();
     return;
   }
 
   if (action === "delete-sample") {
     appState.sampleVisible = false;
+    if (appState.activeConversationId === messagesConfig.sampleCharacter.id) {
+      closeConversation();
+    }
     render();
+    return;
+  }
+
+  if (action === "open-chat") {
+    openSampleConversation();
+    render();
+    return;
+  }
+
+  if (action === "close-chat") {
+    closeConversation();
+    render();
+    return;
+  }
+
+  if (action === "toggle-voice") {
+    appState.isVoiceMode = !appState.isVoiceMode;
+    render();
+    return;
+  }
+
+  if (action === "send-message") {
+    sendDraft();
+    return;
+  }
+
+  if (action === "retry-message") {
+    retryMessage(button.dataset.messageId);
   }
 }
 
@@ -585,8 +1068,7 @@ function wireInteractions(root) {
       const appId = button.getAttribute("data-app");
 
       if (appId === "messages") {
-        appState.activeScreen = "messages";
-        appState.activeMessagesTab = "chats";
+        enterMessagesScreen();
         render();
         return;
       }
@@ -596,7 +1078,8 @@ function wireInteractions(root) {
   });
 
   root.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       handleAction(button.dataset.action, button);
     });
   });
@@ -610,7 +1093,9 @@ function render() {
   rootNode.innerHTML = renderApp();
   mountImageFallbacks(rootNode);
   wireInteractions(rootNode);
+  mountComposer(rootNode);
   setStatusTime();
+  scrollChatToBottom(rootNode);
 }
 
 function init() {
