@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Lola Home</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              apple: ["-apple-system", "BlinkMacSystemFont", "sans-serif"],
+            },
+            colors: {
+              shell: "#4F4F4F",
+              base: "#F8F6F4",
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="min-h-screen bg-[#ece7e1] font-apple text-shell antialiased">
+    <svg width="0" height="0" aria-hidden="true" focusable="false">
+      <defs>
+        <clipPath id="squircle-clip" clipPathUnits="objectBoundingBox">
+          <path d="M .5,0 C .1,0 0,.1 0,.5 0,.9 .1,1 .5,1 .9,1 1,.9 1,.5 1,.1 .9,0 .5,0 Z" />
+        </clipPath>
+      </defs>
+    </svg>
+
+    <main class="mx-auto min-h-screen max-w-[393px]">
+      <div id="app"></div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
