@@ -1033,6 +1033,8 @@ function buildApiRequestConfig(profile, method = "GET", body) {
   if (profile.providerPreset === "anthropic" || profile.requestFormat === "anthropic") {
     headers["x-api-key"] = profile.apiKey;
     headers["anthropic-version"] = "2023-06-01";
+  } else if (profile.providerPreset === "google" && profile.requestFormat === "google-openai") {
+    headers.Authorization = `Bearer ${profile.apiKey}`;
   } else if (profile.googleAiStudioMode || profile.providerPreset === "google") {
     headers["x-goog-api-key"] = profile.apiKey;
   } else {
