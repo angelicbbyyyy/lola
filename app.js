@@ -847,7 +847,7 @@ async function callOpenAI(conversationId) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(errorText || `OpenAI request failed with ${response.status}`);
+    throw new Error(summarizeApiError(null, errorText || `Request failed with ${response.status}`));
   }
 
   const data = await response.json();
@@ -896,7 +896,7 @@ async function requestAIResponse(conversationId, messageId) {
       failed: true,
       retrying: false,
       status: "failed",
-      errorMessage: error.message || "Request failed",
+      errorMessage: summarizeApiError(error),
     }));
   } finally {
     appState.isReplyPending = false;
@@ -1262,6 +1262,35 @@ function extractAssistantText(data, profile) {
   }
 
   return "";
+}
+
+function summarizeApiError(error, responseText = "") {
+  const raw = String(responseText || error?.message || "").trim();
+
+  if (!raw && error?.name === "TypeError") {
+    return "Network request failed. This is often a CORS issue or an unreachable API URL.";
+  }
+
+  if (/failed to fetch|load failed|networkerror|network request failed/i.test(raw)) {
+    return "Network request failed. Check the API URL, CORS proxy, or browser blocking.";
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const nested =
+      parsed?.error?.message ||
+      parsed?.error?.details ||
+      parsed?.message ||
+      parsed?.detail ||
+      parsed?.details;
+    if (nested) {
+      return String(nested);
+    }
+  } catch (_error) {
+    // Keep the original string if it is not JSON.
+  }
+
+  return raw.replace(/^Error:\s*/i, "").slice(0, 220) || "Request failed.";
 }
 
 async function fetchModelsForDraft() {
@@ -1914,6 +1943,9 @@ function renderMessage(conversationId, message) {
 
   const isUser = message.role === "user";
   const metaText = message.failed ? "Failed" : message.status === "read" ? "Read" : "Sent";
+  const errorDetail = message.failed && message.errorMessage
+    ? `<div class="message-error-detail">${message.errorMessage}</div>`
+    : "";
   const retryButton = message.failed
     ? `
       <button
@@ -1946,6 +1978,7 @@ function renderMessage(conversationId, message) {
                 <span>${metaText}</span>
                 ${retryButton}
               </div>
+              ${errorDetail}
               <div class="message-bubble message-bubble--user">
                 ${imageBlock}
                 ${message.text ? `<p>${message.text}</p>` : ""}

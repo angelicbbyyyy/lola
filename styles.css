@@ -1106,6 +1106,19 @@ button {
   margin-top: 0;
 }
 
+.message-error-detail {
+  max-width: 240px;
+  margin-bottom: 6px;
+  align-self: flex-end;
+  border-radius: 14px;
+  background: rgba(210, 109, 109, 0.12);
+  color: #c25e5e;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
 .message-retry {
   display: inline-flex;
   align-items: center;
