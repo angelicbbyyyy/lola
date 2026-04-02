@@ -200,6 +200,7 @@ function createDefaultPersistedState() {
           id: "openai-default",
           name: "OpenAI",
           providerPreset: "openai",
+          requestFormat: "openai-chat",
           apiUrl: "https://api.openai.com/v1",
           apiKey: "",
           model: "gpt-4.1-mini",
@@ -816,16 +817,25 @@ async function callOpenAI(conversationId) {
   }
 
   const baseUrl = String(activeApiProfile.apiUrl || "").trim().replace(/\/+$/, "");
+  const endpointPath =
+    activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic"
+      ? "messages"
+      : "chat/completions";
   const endpoint = activeApiProfile.corsProxyUrl
-    ? `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${baseUrl}/responses`
-    : `${baseUrl}/responses`;
-  const response = await fetch(
-    endpoint,
-    buildApiRequestConfig(activeApiProfile, "POST", {
-      model: activeApiProfile.model || "gpt-4.1-mini",
-      input: buildOpenAIInput(conversationId),
-    }),
-  );
+    ? `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${baseUrl}/${endpointPath}`
+    : `${baseUrl}/${endpointPath}`;
+  const requestBody =
+    activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic"
+      ? {
+          model: activeApiProfile.model || "claude-3-5-sonnet-latest",
+          max_tokens: 1024,
+          ...buildAnthropicMessages(conversationId),
+        }
+      : {
+          model: activeApiProfile.model || "gpt-4.1-mini",
+          messages: buildOpenAICompatibleMessages(conversationId),
+        };
+  const response = await fetch(endpoint, buildApiRequestConfig(activeApiProfile, "POST", requestBody));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -834,16 +844,9 @@ async function callOpenAI(conversationId) {
 
   const data = await response.json();
 
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
-
-  for (const outputItem of data.output || []) {
-    for (const contentItem of outputItem.content || []) {
-      if (typeof contentItem.text === "string" && contentItem.text.trim()) {
-        return contentItem.text.trim();
-      }
-    }
+  const assistantText = extractAssistantText(data, activeApiProfile);
+  if (assistantText) {
+    return assistantText;
   }
 
   throw new Error("The model returned an empty response.");
@@ -985,6 +988,7 @@ function createBlankApiProfile(name = "") {
     id,
     name: cleanName,
     providerPreset: "openai",
+    requestFormat: "openai-chat",
     apiUrl: "https://api.openai.com/v1",
     apiKey: "",
     model: "",
@@ -1001,8 +1005,19 @@ function applyProviderPresetToProfile(profile, preset) {
     return {
       ...profile,
       providerPreset: "google",
+      requestFormat: "openai-chat",
       googleAiStudioMode: true,
       apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    };
+  }
+
+  if (preset === "anthropic") {
+    return {
+      ...profile,
+      providerPreset: "anthropic",
+      requestFormat: "anthropic",
+      googleAiStudioMode: false,
+      apiUrl: "https://api.anthropic.com/v1",
     };
   }
 
@@ -1010,6 +1025,7 @@ function applyProviderPresetToProfile(profile, preset) {
     return {
       ...profile,
       providerPreset: "local",
+      requestFormat: "openai-chat",
       googleAiStudioMode: false,
       apiUrl: "http://localhost:1234/v1",
     };
@@ -1018,6 +1034,7 @@ function applyProviderPresetToProfile(profile, preset) {
   return {
     ...profile,
     providerPreset: "openai",
+    requestFormat: "openai-chat",
     googleAiStudioMode: false,
     apiUrl: "https://api.openai.com/v1",
   };
@@ -1051,7 +1068,10 @@ function buildApiRequestConfig(profile, method = "GET", body) {
     "Content-Type": "application/json",
   };
 
-  if (profile.googleAiStudioMode || profile.providerPreset === "google") {
+  if (profile.providerPreset === "anthropic" || profile.requestFormat === "anthropic") {
+    headers["x-api-key"] = profile.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+  } else if (profile.googleAiStudioMode || profile.providerPreset === "google") {
     headers["x-goog-api-key"] = profile.apiKey;
   } else {
     headers.Authorization = `Bearer ${profile.apiKey}`;
@@ -1062,6 +1082,127 @@ function buildApiRequestConfig(profile, method = "GET", body) {
     headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   };
+}
+
+function buildOpenAICompatibleMessages(conversationId) {
+  const input = buildOpenAIInput(conversationId);
+  const systemItem = input.find((item) => item.role === "system");
+  const messages = [];
+
+  if (systemItem?.content?.[0]?.text) {
+    messages.push({
+      role: "system",
+      content: systemItem.content[0].text,
+    });
+  }
+
+  input
+    .filter((item) => item.role !== "system")
+    .forEach((item) => {
+      const content = item.content.map((entry) => {
+        if (entry.type === "input_image") {
+          return {
+            type: "image_url",
+            image_url: {
+              url: entry.image_url,
+            },
+          };
+        }
+
+        return {
+          type: "text",
+          text: entry.text,
+        };
+      });
+
+      messages.push({
+        role: item.role,
+        content,
+      });
+    });
+
+  return messages;
+}
+
+function buildAnthropicMessages(conversationId) {
+  const input = buildOpenAIInput(conversationId);
+  const systemItem = input.find((item) => item.role === "system");
+  const messages = [];
+
+  input
+    .filter((item) => item.role !== "system")
+    .forEach((item) => {
+      const content = item.content.map((entry) => {
+        if (entry.type === "input_image") {
+          const [header, data] = String(entry.image_url || "").split(",");
+          const mediaTypeMatch = header.match(/data:(.*?);base64/);
+          return {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mediaTypeMatch?.[1] || "image/png",
+              data: data || "",
+            },
+          };
+        }
+
+        return {
+          type: "text",
+          text: entry.text,
+        };
+      });
+
+      messages.push({
+        role: item.role === "assistant" ? "assistant" : "user",
+        content,
+      });
+    });
+
+  return {
+    system: systemItem?.content?.[0]?.text || "",
+    messages,
+  };
+}
+
+function extractAssistantText(data, profile) {
+  if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
+    const textParts = (data.content || [])
+      .filter((item) => item.type === "text" && item.text)
+      .map((item) => item.text.trim())
+      .filter(Boolean);
+    return textParts.join("\n\n").trim();
+  }
+
+  if (typeof data.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  if (data.choices?.[0]?.message) {
+    const message = data.choices[0].message;
+    if (typeof message.content === "string" && message.content.trim()) {
+      return message.content.trim();
+    }
+    if (Array.isArray(message.content)) {
+      const parts = message.content
+        .map((item) => item.text || item.content || "")
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
+      if (parts) {
+        return parts;
+      }
+    }
+  }
+
+  for (const outputItem of data.output || []) {
+    for (const contentItem of outputItem.content || []) {
+      if (typeof contentItem.text === "string" && contentItem.text.trim()) {
+        return contentItem.text.trim();
+      }
+    }
+  }
+
+  return "";
 }
 
 async function fetchModelsForDraft() {
@@ -1083,26 +1224,63 @@ async function fetchModelsForDraft() {
   render();
 
   try {
+    let data = null;
+    let response = null;
     const endpoint = buildModelsEndpoint(profile);
-    const targetUrl = profile.corsProxyUrl
-      ? `${profile.corsProxyUrl.replace(/\/+$/, "")}/${endpoint}`
-      : endpoint;
-    const response = await fetch(targetUrl, buildApiRequestConfig(profile));
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || `Model fetch failed with ${response.status}`);
+    if (profile.providerPreset === "google" || profile.googleAiStudioMode) {
+      const nativeGoogleEndpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(profile.apiKey)}`;
+      response = await fetch(nativeGoogleEndpoint);
+      if (response.ok) {
+        data = await response.json();
+      }
     }
 
-    const data = await response.json();
+    if (!data) {
+      response = await fetch(endpoint, buildApiRequestConfig(profile));
+      if (!response.ok) {
+        if (profile.providerPreset === "anthropic") {
+          appState.apiProfileDraft = {
+            ...profile,
+            availableModels: ["claude-3-5-sonnet-latest", "claude-3-7-sonnet-latest"],
+            model: profile.model || "claude-3-5-sonnet-latest",
+            lastConnectionStatus: "success",
+            lastConnectionMessage: "Anthropic profile saved. Using built-in Claude model suggestions.",
+          };
+          appState.apiConnectionState = {
+            status: "success",
+            message: appState.apiProfileDraft.lastConnectionMessage,
+          };
+          render();
+          return;
+        }
+        const errorText = await response.text();
+        throw new Error(errorText || `Model fetch failed with ${response.status}`);
+      }
+      data = await response.json();
+    }
+
     const modelItems = Array.isArray(data.data)
       ? data.data
       : Array.isArray(data.models)
         ? data.models
-        : [];
-    const availableModels = modelItems
-      .map((item) => item.id || item.name || item.model)
-      .filter(Boolean);
+        : Array.isArray(data?.models)
+          ? data.models
+          : Array.isArray(data?.data?.models)
+            ? data.data.models
+            : Array.isArray(data?.models)
+              ? data.models
+              : [];
+    const fallbackGoogleModels = Array.isArray(data?.models) ? data.models : [];
+    const normalizedItems = modelItems.length ? modelItems : fallbackGoogleModels;
+    const availableModels = normalizedItems
+      .map((item) => item.id || item.name || item.model || item.displayName)
+      .filter(Boolean)
+      .filter((model) => !/embedding|tts|image|aqa/i.test(model));
+
+    if (!availableModels.length && profile.providerPreset === "anthropic") {
+      availableModels.push("claude-3-5-sonnet-latest", "claude-3-7-sonnet-latest");
+    }
 
     appState.apiProfileDraft = {
       ...profile,
@@ -1586,6 +1764,7 @@ function renderCentralSettingsScreen() {
                   <select class="chat-settings-inline-select" data-role="provider-preset-select">
                     <option value="openai" ${draft.providerPreset === "openai" ? "selected" : ""}>OpenAI</option>
                     <option value="google" ${draft.providerPreset === "google" ? "selected" : ""}>Google AI Studio</option>
+                    <option value="anthropic" ${draft.providerPreset === "anthropic" ? "selected" : ""}>Claude / Anthropic</option>
                     <option value="local" ${draft.providerPreset === "local" ? "selected" : ""}>Local LLM</option>
                   </select>
                 </label>
@@ -1601,7 +1780,7 @@ function renderCentralSettingsScreen() {
               <div class="chat-settings-card">
                 <label class="chat-settings-stack-row">
                   <span class="chat-settings-row-title">API URL</span>
-                  <span class="chat-settings-row-detail">For many providers, the URL should end in /v1.</span>
+                  <span class="chat-settings-row-detail">OpenAI-style providers usually end in /v1. Anthropic uses /v1. Google mode auto-formats its own endpoint.</span>
                   <input type="text" class="chat-settings-text-input" data-role="api-url-input" value="${escapeAttribute(draft.apiUrl)}" placeholder="https://api.openai.com/v1" />
                 </label>
                 <label class="chat-settings-stack-row">
@@ -2188,6 +2367,8 @@ function mountSettingsInputs(root) {
       if (!nextProfile) {
         return;
       }
+      persistedState.appSettings.activeApiProfileId = nextProfile.id;
+      saveChatState();
       appState.activeApiProfileId = nextProfile.id;
       appState.apiProfileDraft = { ...nextProfile };
       appState.apiConnectionState = {
