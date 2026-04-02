@@ -1139,8 +1139,8 @@ function buildGoogleMessages(source) {
           const [header, data] = String(entry.image_url || "").split(",");
           const mediaTypeMatch = header.match(/data:(.*?);base64/);
           return {
-            inline_data: {
-              mime_type: mediaTypeMatch?.[1] || "image/png",
+            inlineData: {
+              mimeType: mediaTypeMatch?.[1] || "image/png",
               data: data || "",
             },
           };
@@ -1158,13 +1158,20 @@ function buildGoogleMessages(source) {
     });
 
   return {
-    system_instruction: systemItem?.content?.[0]?.text
+    systemInstruction: systemItem?.content?.[0]?.text
       ? {
           parts: [{ text: systemItem.content[0].text }],
         }
       : undefined,
     contents,
   };
+}
+
+function normalizeGoogleModelName(model) {
+  return String(model || "")
+    .replace(/^models\//, "")
+    .replace(/^tunedModels\//, "")
+    .trim();
 }
 
 function extractAssistantText(data, profile) {
@@ -1274,7 +1281,7 @@ async function executeProfileRequest(profile, sourceInput) {
   let requestBody = {};
 
   if (profile.requestFormat === "google-native" || profile.providerPreset === "google") {
-    const model = profile.model || "gemini-1.5-pro";
+    const model = normalizeGoogleModelName(profile.model || "gemini-1.5-pro");
     endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
     requestBody = buildGoogleMessages(sourceInput);
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
@@ -1380,7 +1387,12 @@ async function fetchModelsForDraft() {
     const fallbackGoogleModels = Array.isArray(data?.models) ? data.models : [];
     const normalizedItems = modelItems.length ? modelItems : fallbackGoogleModels;
     const availableModels = normalizedItems
-      .map((item) => item.id || item.name || item.model || item.displayName)
+      .map((item) => {
+        const rawModel = item.id || item.name || item.model || item.displayName;
+        return profile.providerPreset === "google" || profile.googleAiStudioMode
+          ? normalizeGoogleModelName(rawModel)
+          : rawModel;
+      })
       .filter(Boolean)
       .filter((model) => !/embedding|tts|image|aqa/i.test(model));
 
