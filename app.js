@@ -1168,10 +1168,24 @@ function buildGoogleMessages(source) {
 }
 
 function normalizeGoogleModelName(model) {
-  return String(model || "")
+  const raw = String(model || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const cleaned = raw
+    .replace(/^https?:\/\/[^/]+\//, "")
+    .replace(/^v\d+(beta)?\//i, "")
+    .replace(/^publishers\/[^/]+\//, "")
     .replace(/^models\//, "")
     .replace(/^tunedModels\//, "")
     .trim();
+
+  if (!cleaned.includes("/")) {
+    return cleaned;
+  }
+
+  return cleaned.split("/").filter(Boolean).pop() || cleaned;
 }
 
 function extractAssistantText(data, profile) {
