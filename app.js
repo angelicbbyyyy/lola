@@ -2,8 +2,9 @@ const ASSET_BASE = "./assets";
 
 const homeConfig = {
   status: {
-    time: "21:40",
-    image: "status-icons.png",
+    signalImage: "Mobile Signal-2.png",
+    wifiImage: "Wifi.png",
+    batteryImage: "Battery.png",
   },
   banners: [
     {
@@ -249,9 +250,17 @@ function renderScreen() {
     <div class="phone-shell">
       <div class="shell-inner">
         <header class="mb-5 flex items-center justify-between px-[4px] pt-1">
-          <div class="text-[15px] font-semibold tracking-[-0.02em]">${homeConfig.status.time}</div>
-          <div class="h-5 w-[74px]">
-            ${imageMarkup(homeConfig.status.image, "Status icons", "h-full w-full object-contain", "80%")}
+          <div id="status-time" class="text-[15px] font-semibold tracking-[-0.02em]">--:--</div>
+          <div class="flex h-5 items-center gap-1.5">
+            <div class="h-[11px] w-[18px]">
+              ${imageMarkup(homeConfig.status.signalImage, "Mobile signal", "h-full w-full object-contain", "SIG")}
+            </div>
+            <div class="h-[11px] w-[16px]">
+              ${imageMarkup(homeConfig.status.wifiImage, "Wi-Fi", "h-full w-full object-contain", "WF")}
+            </div>
+            <div class="h-[14px] w-[24px]">
+              ${imageMarkup(homeConfig.status.batteryImage, "Battery", "h-full w-full object-contain", "BAT")}
+            </div>
           </div>
         </header>
 
@@ -309,6 +318,36 @@ function wireInteractions(root) {
   });
 }
 
+function formatLocalTime() {
+  return new Intl.DateTimeFormat([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
+function mountStatusClock(root) {
+  const timeNode = root.querySelector("#status-time");
+
+  if (!timeNode) {
+    return;
+  }
+
+  const renderTime = () => {
+    timeNode.textContent = formatLocalTime();
+  };
+
+  renderTime();
+
+  const now = new Date();
+  const delayUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+
+  window.setTimeout(() => {
+    renderTime();
+    window.setInterval(renderTime, 60 * 1000);
+  }, delayUntilNextMinute);
+}
+
 function init() {
   const root = document.getElementById("app");
 
@@ -318,6 +357,7 @@ function init() {
 
   root.innerHTML = renderScreen();
   wireInteractions(root);
+  mountStatusClock(root);
 }
 
 init();
