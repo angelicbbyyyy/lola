@@ -1094,20 +1094,20 @@ function buildGoogleCompatibleMessages(source) {
   const systemText = input.find((item) => item.role === "system")?.content?.[0]?.text || "";
   const messages = [];
 
+  if (systemText) {
+    messages.push({ role: "system", content: systemText });
+  }
+
   input
     .filter((item) => item.role !== "system")
-    .forEach((item, index) => {
+    .forEach((item) => {
       const textParts = item.content
         .filter((entry) => entry.type === "input_text" && entry.text)
         .map((entry) => entry.text.trim())
         .filter(Boolean);
 
       const imageParts = item.content.filter((entry) => entry.type === "input_image");
-      let content = textParts.join("\n\n");
-
-      if (index === 0 && systemText) {
-        content = `${systemText}\n\n${content}`.trim();
-      }
+      const content = textParts.join("\n\n");
 
       if (imageParts.length) {
         const contentParts = [];
