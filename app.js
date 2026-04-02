@@ -7,11 +7,11 @@ const appState = {
   activeMessagesTab: "chats",
   messagesView: "list",
   activeConversationId: null,
+  chatView: "conversation",
   draftMessage: "",
   pendingAttachment: null,
   isVoiceMode: false,
   isReplyPending: false,
-  settingsOpen: false,
   attachmentMenuOpen: false,
   conversationTimers: [],
 };
@@ -65,6 +65,20 @@ const messagesConfig = {
         id: "post-2",
         text: "Soft sepia, tiny dots, quiet corners. This is where Moments will grow next.",
       },
+    ],
+  },
+  generatedMoments: {
+    low: [
+      "Left a tiny thought in Moments and wondered if you would notice.",
+      "Pinned a soft little update in Moments and thought of you.",
+    ],
+    medium: [
+      "I posted something small in Moments because you were on my mind again.",
+      "I left a quiet update in Moments so the day would still feel shared.",
+    ],
+    high: [
+      "I posted to Moments because I wanted some trace of me to reach you first.",
+      "I kept thinking about you, so Moments became my excuse to speak first.",
     ],
   },
   settingsProfile: {
@@ -185,15 +199,46 @@ function createDefaultPersistedState() {
         avatar: "contacts.JPG",
         worldbook:
           "You are Angel Bunny. Speak gently, intimately, and a little clingy, like a soft WeChat romance sim character. Stay emotionally aware, affectionate, and reactive. Keep responses concise unless the user is emotional or sends an image.",
+        memoryMessageCount: 30,
+        intelligentMemoryManagement: true,
+        timeAwareness: true,
+        locationWeatherAwareness: false,
+        proactiveMessaging: true,
         messageFrequency: "medium",
+        momentsPosting: true,
+        momentsFrequency: "low",
         isBlocked: false,
         chatWallpaper: "",
+        nicknameForUser: "",
         isVisible: true,
       },
     },
     conversations: {
-      "angel-bunny": defaultConversationMessages.map((message) => ({ ...message })),
+      "angel-bunny": defaultConversationMessages.map((message) => ({ ...message, metaType: message.metaType || "seed" })),
     },
+    momentsPosts: [
+      {
+        id: "moment-default-1",
+        characterId: "angel-bunny",
+        text: "I leave little thought bubbles here, like a pinned moodboard for our chats.",
+        timestamp: "Today",
+        generated: false,
+      },
+      {
+        id: "moment-default-2",
+        characterId: "angel-bunny",
+        text: "Soft sepia, tiny dots, quiet corners. This is where Moments will grow next.",
+        timestamp: "Today",
+        generated: false,
+      },
+    ],
+  };
+}
+
+function normalizeProfile(profile, defaults) {
+  return {
+    ...defaults,
+    ...profile,
   };
 }
 
@@ -213,13 +258,18 @@ function loadChatState() {
         ...(parsed.appSettings || {}),
       },
       characterProfiles: {
-        ...defaults.characterProfiles,
-        ...(parsed.characterProfiles || {}),
+        ...Object.fromEntries(
+          Object.entries({
+            ...defaults.characterProfiles,
+            ...(parsed.characterProfiles || {}),
+          }).map(([id, profile]) => [id, normalizeProfile(profile, defaults.characterProfiles["angel-bunny"])]),
+        ),
       },
       conversations: {
         ...defaults.conversations,
         ...(parsed.conversations || {}),
       },
+      momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
     };
   } catch (error) {
     console.warn("Unable to load saved chat state:", error);
@@ -263,7 +313,7 @@ function getProfile(id) {
 
 function updateProfile(id, patch) {
   persistedState.characterProfiles[id] = {
-    ...getProfile(id),
+    ...normalizeProfile(getProfile(id), createDefaultPersistedState().characterProfiles["angel-bunny"]),
     ...patch,
   };
   saveChatState();
@@ -475,6 +525,60 @@ function currentChatStatus() {
   return profile?.status || "Online";
 }
 
+function frequencyChance(level) {
+  if (level === "high") {
+    return 0.14;
+  }
+  if (level === "medium") {
+    return 0.08;
+  }
+  return 0.04;
+}
+
+function frequencyLabel(level) {
+  if (level === "high") {
+    return "High";
+  }
+  if (level === "medium") {
+    return "Medium";
+  }
+  return "Low (1-2 hours)";
+}
+
+function currentAwarenessSummary(profile) {
+  const parts = [];
+  if (profile.timeAwareness) {
+    parts.push("time-aware");
+  }
+  if (profile.locationWeatherAwareness) {
+    parts.push("weather-aware");
+  }
+  if (profile.proactiveMessaging) {
+    parts.push("proactive");
+  }
+  return parts.join(" · ") || "gentle mode";
+}
+
+function currentTimeContext() {
+  const now = new Date();
+  const hour = now.getHours();
+  let tone = "daylight";
+  if (hour >= 23 || hour < 5) {
+    tone = "late night";
+  } else if (hour < 12) {
+    tone = "morning";
+  } else if (hour < 18) {
+    tone = "afternoon";
+  } else {
+    tone = "evening";
+  }
+  return `${formatLocalTime()} local time, ${tone}`;
+}
+
+function currentWeatherContext() {
+  return "Location & weather are simulated as a soft, cloudy day with calm indoor light.";
+}
+
 function clearConversationTimers() {
   appState.conversationTimers.forEach((timer) => window.clearTimeout(timer));
   appState.conversationTimers = [];
@@ -541,7 +645,7 @@ function enterMessagesScreen() {
   appState.activeMessagesTab = "chats";
   appState.messagesView = "list";
   appState.activeConversationId = null;
-  appState.settingsOpen = false;
+  appState.chatView = "conversation";
   appState.attachmentMenuOpen = false;
 }
 
@@ -550,28 +654,53 @@ function openConversation(conversationId) {
   appState.activeMessagesTab = "chats";
   appState.messagesView = "chat";
   appState.activeConversationId = conversationId;
+  appState.chatView = "conversation";
   appState.draftMessage = "";
   appState.pendingAttachment = null;
-  appState.settingsOpen = false;
   appState.attachmentMenuOpen = false;
 }
 
 function closeConversation() {
   appState.messagesView = "list";
   appState.activeConversationId = null;
+  appState.chatView = "conversation";
   appState.isReplyPending = false;
   appState.draftMessage = "";
   appState.pendingAttachment = null;
-  appState.settingsOpen = false;
   appState.attachmentMenuOpen = false;
   clearConversationTimers();
 }
 
 function buildOpenAIInput(conversationId) {
   const profile = getProfile(conversationId);
-  const history = getConversation(conversationId).filter((message) => !message.typing).slice(-20);
+  const memoryLimit = Math.max(1, Number(profile.memoryMessageCount) || 30);
+  const allHistory = getConversation(conversationId).filter((message) => !message.typing && !message.failed);
+  const recentHistory = allHistory.slice(-memoryLimit);
+  const prioritized = profile.intelligentMemoryManagement
+    ? [
+        ...allHistory.filter((message) => message.imageDataUrl).slice(-4),
+        ...allHistory.filter((message) => message.metaType === "distressed" || message.metaType === "spontaneous").slice(-4),
+        ...recentHistory,
+      ]
+    : recentHistory;
+  const uniqueHistory = prioritized.filter(
+    (message, index, messages) => messages.findIndex((entry) => entry.id === message.id) === index,
+  );
+  const awareness = [];
+  if (profile.nicknameForUser) {
+    awareness.push(`Call the user "${profile.nicknameForUser}" naturally when it feels affectionate.`);
+  }
+  if (profile.timeAwareness) {
+    awareness.push(`Current local time context: ${currentTimeContext()}. Adjust greetings and mood naturally.`);
+  }
+  if (profile.locationWeatherAwareness) {
+    awareness.push(currentWeatherContext());
+  }
   const systemText =
     `${profile.worldbook}\n\n` +
+    `${awareness.join(" ")}\n\n` +
+    `Remember up to ${memoryLimit} recent messages. ` +
+    `${profile.intelligentMemoryManagement ? "Prefer emotionally salient and image-bearing moments when staying consistent." : ""} ` +
     `Message frequency: ${profile.messageFrequency}. ` +
     `Blocked state: ${profile.isBlocked ? "blocked" : "not blocked"}. ` +
     `Speak as ${profile.name} in a soft, intimate WeChat style.`;
@@ -583,7 +712,7 @@ function buildOpenAIInput(conversationId) {
     },
   ];
 
-  history.forEach((message) => {
+  uniqueHistory.forEach((message) => {
     const content = [];
     if (message.text) {
       content.push({ type: "input_text", text: message.text });
@@ -759,14 +888,18 @@ function resendRequest(messageId) {
   sendMessage(result.conversationId, "", null, messageId);
 }
 
-function frequencyChance(level) {
-  if (level === "high") {
-    return 0.14;
-  }
-  if (level === "medium") {
-    return 0.08;
-  }
-  return 0.04;
+function createMomentPost(characterId, text, generated = true) {
+  persistedState.momentsPosts = [
+    {
+      id: `moment-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      characterId,
+      text,
+      timestamp: formatLocalTime(),
+      generated,
+    },
+    ...(persistedState.momentsPosts || []),
+  ].slice(0, 24);
+  saveChatState();
 }
 
 function maybeSimulateCharacterActivity() {
@@ -794,8 +927,19 @@ function maybeSimulateCharacterActivity() {
       return;
     }
 
+    if (!profile.proactiveMessaging) {
+      return;
+    }
+
     const isActiveChat = appState.activeScreen === "messages" && appState.messagesView === "chat" && appState.activeConversationId === profile.id;
     if (!isActiveChat || appState.isReplyPending) {
+      if (profile.momentsPosting && Math.random() <= frequencyChance(profile.momentsFrequency || "low") * 0.3) {
+        const bucket = messagesConfig.generatedMoments[profile.momentsFrequency] || messagesConfig.generatedMoments.low;
+        createMomentPost(profile.id, bucket[Math.floor(Math.random() * bucket.length)]);
+        if (appState.activeMessagesTab === "moments" && appState.activeScreen === "messages") {
+          render();
+        }
+      }
       return;
     }
 
@@ -812,6 +956,11 @@ function maybeSimulateCharacterActivity() {
         }),
       );
       render();
+    }
+
+    if (profile.momentsPosting && Math.random() <= frequencyChance(profile.momentsFrequency || "low") * 0.35) {
+      const bucket = messagesConfig.generatedMoments[profile.momentsFrequency] || messagesConfig.generatedMoments.low;
+      createMomentPost(profile.id, bucket[Math.floor(Math.random() * bucket.length)]);
     }
   });
 }
@@ -1058,6 +1207,7 @@ function renderContactsTab() {
 
 function renderMomentsTab() {
   const profile = getProfile("angel-bunny");
+  const posts = (persistedState.momentsPosts || []).filter((post) => post.characterId === "angel-bunny");
 
   return `
     <div class="messages-pane messages-pane-moments">
@@ -1079,10 +1229,11 @@ function renderMomentsTab() {
         <div class="moments-divider">
           <span>${messagesConfig.moments.coverBadge}</span>
         </div>
-        ${messagesConfig.moments.posts
+        ${posts
           .map(
             (post) => `
               <article class="moment-card" data-post-id="${post.id}">
+                <div class="moment-card-meta">${post.generated ? "Character update" : "Pinned note"} · ${post.timestamp}</div>
                 <p>${post.text}</p>
               </article>
             `,
@@ -1244,6 +1395,180 @@ function renderAttachmentMenu() {
   `;
 }
 
+function settingsSectionIcon(name) {
+  const icons = {
+    memory: "🧠",
+    awareness: "🌐",
+    proactive: "♡",
+    safety: "✦",
+    customize: "☁",
+    api: "⌘",
+  };
+  return `<span class="chat-settings-section-icon" aria-hidden="true">${icons[name] || "•"}</span>`;
+}
+
+function renderToggleField(label, role, checked, helper = "", destructive = false) {
+  return `
+    <label class="chat-settings-row ${destructive ? "is-destructive" : ""}">
+      <span class="chat-settings-row-copy">
+        <span class="chat-settings-row-title">${label}</span>
+        ${helper ? `<span class="chat-settings-row-detail">${helper}</span>` : ""}
+      </span>
+      <span class="chat-settings-switch">
+        <input type="checkbox" data-role="${role}" ${checked ? "checked" : ""} />
+        <span class="chat-settings-switch-track"></span>
+      </span>
+    </label>
+  `;
+}
+
+function renderChatSettingsScreen(conversationId) {
+  const profile = getProfile(conversationId);
+  const { openAIApiKey, apiModel } = persistedState.appSettings;
+  const wallpaperStyle = profile.chatWallpaper
+    ? `style="background-image:url('${escapeAttribute(profile.chatWallpaper)}'); background-size:cover; background-position:center;"`
+    : "";
+
+  return `
+    <div class="chat-settings-view">
+      <input type="file" accept="image/*" hidden data-role="wallpaper-input" />
+      <div class="chat-settings-surface" ${wallpaperStyle}>
+        <div class="chat-settings-scrim"></div>
+        <div class="chat-settings-content">
+          <div class="chat-settings-header">
+            <button type="button" class="messages-back" data-action="close-settings-screen" aria-label="Back to chat">
+              ${iconSvg("back")}
+            </button>
+            <div class="chat-settings-title">Chat Settings</div>
+            <div class="chat-settings-placeholder" aria-hidden="true"></div>
+          </div>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("memory")}
+              <h3>Memory & Context</h3>
+            </div>
+            <div class="chat-settings-card">
+              <label class="chat-settings-row">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Historical Messages Count</span>
+                  <span class="chat-settings-row-detail">Default: 30 rounds</span>
+                </span>
+                <input type="number" min="1" max="120" class="chat-settings-inline-input" data-role="memory-count-input" value="${profile.memoryMessageCount}" />
+              </label>
+              ${renderToggleField("Intelligent Memory Management", "memory-management-toggle", profile.intelligentMemoryManagement, "Keep important emotional and image moments more stable.")}
+              <label class="chat-settings-stack-row">
+                <span class="chat-settings-row-title">Link Worldbook</span>
+                <span class="chat-settings-row-detail">${profile.worldbook.slice(0, 100)}${profile.worldbook.length > 100 ? "..." : ""}</span>
+                <textarea class="chat-settings-textarea" data-role="worldbook-input">${profile.worldbook}</textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("awareness")}
+              <h3>Awareness</h3>
+            </div>
+            <div class="chat-settings-card">
+              ${renderToggleField("Time Awareness", "time-awareness-toggle", profile.timeAwareness, "Lets the character react to local time and late-night mood.")}
+              ${renderToggleField("Location & Weather Awareness", "weather-awareness-toggle", profile.locationWeatherAwareness, "Simulated by soft status context, not real location APIs.")}
+            </div>
+          </section>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("proactive")}
+              <h3>Proactive Interaction</h3>
+            </div>
+            <div class="chat-settings-card">
+              ${renderToggleField("Character Proactively Messages Me", "proactive-toggle", profile.proactiveMessaging, "Lets the character reach out first on its own.")}
+              <label class="chat-settings-row">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Messaging Frequency</span>
+                  <span class="chat-settings-row-detail">${frequencyLabel(profile.messageFrequency)}</span>
+                </span>
+                <select class="chat-settings-inline-select" data-role="frequency-select">
+                  <option value="low" ${profile.messageFrequency === "low" ? "selected" : ""}>Low (1-2 hours)</option>
+                  <option value="medium" ${profile.messageFrequency === "medium" ? "selected" : ""}>Medium</option>
+                  <option value="high" ${profile.messageFrequency === "high" ? "selected" : ""}>High</option>
+                </select>
+              </label>
+              ${renderToggleField("Character Posts to Moments", "moments-toggle", profile.momentsPosting, "Creates real auto-posts in the Moments tab.")}
+              <label class="chat-settings-row">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Moments Posting Frequency</span>
+                  <span class="chat-settings-row-detail">${frequencyLabel(profile.momentsFrequency || "low")}</span>
+                </span>
+                <select class="chat-settings-inline-select" data-role="moments-frequency-select">
+                  <option value="low" ${(profile.momentsFrequency || "low") === "low" ? "selected" : ""}>Low (1-2 hours)</option>
+                  <option value="medium" ${profile.momentsFrequency === "medium" ? "selected" : ""}>Medium</option>
+                  <option value="high" ${profile.momentsFrequency === "high" ? "selected" : ""}>High</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("safety")}
+              <h3>Blacklist Management</h3>
+            </div>
+            <div class="chat-settings-card">
+              ${renderToggleField("Block / Unblock Character", "block-toggle", profile.isBlocked, "Blocked characters may still send desperate pings.", true)}
+              <button type="button" class="chat-settings-row chat-settings-action is-destructive" data-action="clear-chat-records">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Clear Chat Records</span>
+                  <span class="chat-settings-row-detail">Remove this conversation only. Character settings stay saved.</span>
+                </span>
+                <span class="contacts-chevron">></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("customize")}
+              <h3>Individual Customization</h3>
+            </div>
+            <div class="chat-settings-card">
+              <button type="button" class="chat-settings-row chat-settings-action" data-action="pick-wallpaper">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Change Chat Wallpaper</span>
+                  <span class="chat-settings-row-detail">${profile.chatWallpaper ? "Wallpaper selected" : "Choose an image from this device"}</span>
+                </span>
+                <span class="contacts-chevron">></span>
+              </button>
+              <label class="chat-settings-stack-row">
+                <span class="chat-settings-row-title">Nickname</span>
+                <span class="chat-settings-row-detail">What the character calls you in replies.</span>
+                <input type="text" class="chat-settings-text-input" data-role="nickname-input" value="${escapeAttribute(profile.nicknameForUser)}" placeholder="My love, bunny, Maria..." />
+              </label>
+            </div>
+          </section>
+
+          <section class="chat-settings-section">
+            <div class="chat-settings-section-header">
+              ${settingsSectionIcon("api")}
+              <h3>Model & API</h3>
+            </div>
+            <div class="chat-settings-card">
+              <label class="chat-settings-stack-row">
+                <span class="chat-settings-row-title">OpenAI API Key</span>
+                <input type="password" class="chat-settings-text-input" data-role="api-key-input" value="${escapeAttribute(openAIApiKey)}" placeholder="sk-..." />
+              </label>
+              <label class="chat-settings-stack-row">
+                <span class="chat-settings-row-title">Model</span>
+                <input type="text" class="chat-settings-text-input" data-role="api-model-input" value="${escapeAttribute(apiModel)}" />
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderChatComposer(conversationId) {
   const profile = getProfile(conversationId);
   const draft = appState.draftMessage;
@@ -1297,62 +1622,6 @@ function renderChatComposer(conversationId) {
   `;
 }
 
-function renderSettingsSheet(conversationId) {
-  if (!appState.settingsOpen) {
-    return "";
-  }
-
-  const profile = getProfile(conversationId);
-  const { openAIApiKey, apiModel } = persistedState.appSettings;
-
-  return `
-    <div class="settings-sheet-overlay" data-action="close-settings">
-      <div class="settings-sheet" onclick="event.stopPropagation()">
-        <div class="settings-sheet-header">
-          <h3>Chat Settings</h3>
-          <button type="button" class="settings-sheet-close" data-action="close-settings" aria-label="Close settings">×</button>
-        </div>
-
-        <label class="settings-field">
-          <span>Worldbook</span>
-          <textarea class="settings-textarea" data-role="worldbook-input">${profile.worldbook}</textarea>
-        </label>
-
-        <label class="settings-field">
-          <span>Message Frequency</span>
-          <select class="settings-select" data-role="frequency-select">
-            <option value="low" ${profile.messageFrequency === "low" ? "selected" : ""}>Low</option>
-            <option value="medium" ${profile.messageFrequency === "medium" ? "selected" : ""}>Medium</option>
-            <option value="high" ${profile.messageFrequency === "high" ? "selected" : ""}>High</option>
-          </select>
-        </label>
-
-        <label class="settings-field settings-toggle-row">
-          <span>Blocked</span>
-          <input type="checkbox" data-role="block-toggle" ${profile.isBlocked ? "checked" : ""} />
-        </label>
-
-        <label class="settings-field">
-          <span>OpenAI API Key</span>
-          <input type="password" class="settings-input" data-role="api-key-input" value="${escapeAttribute(openAIApiKey)}" placeholder="sk-..." />
-        </label>
-
-        <label class="settings-field">
-          <span>Model</span>
-          <input type="text" class="settings-input" data-role="api-model-input" value="${escapeAttribute(apiModel)}" />
-        </label>
-
-        <div class="settings-field">
-          <span>Wallpaper</span>
-          <button type="button" class="settings-upload-button" data-action="pick-wallpaper">
-            ${profile.chatWallpaper ? "Change Wallpaper" : "Choose Wallpaper"}
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function renderChatHeader(conversationId) {
   const profile = getProfile(conversationId);
   return `
@@ -1370,7 +1639,7 @@ function renderChatHeader(conversationId) {
         <button type="button" class="chat-header-icon" aria-label="Video call">
           ${iconSvg("video")}
         </button>
-        <button type="button" class="chat-header-icon" data-action="toggle-settings" aria-label="More options">
+        <button type="button" class="chat-header-icon" data-action="open-settings-screen" aria-label="More options">
           ${iconSvg("more")}
         </button>
       </div>
@@ -1387,16 +1656,21 @@ function renderChatScreen() {
 
   return `
     <div class="messages-chat-view">
-      <input type="file" accept="image/*" hidden data-role="wallpaper-input" />
-      <input type="file" accept="image/*" hidden data-role="attachment-input" />
-      ${renderChatHeader(conversationId)}
-      <div class="chat-surface" ${wallpaperStyle}>
-        <div class="chat-scroll" data-role="chat-scroll">
-          ${getConversation(conversationId).map((message) => renderMessage(conversationId, message)).join("")}
-        </div>
-      </div>
-      ${renderChatComposer(conversationId)}
-      ${renderSettingsSheet(conversationId)}
+      ${
+        appState.chatView === "settings"
+          ? renderChatSettingsScreen(conversationId)
+          : `
+            <input type="file" accept="image/*" hidden data-role="wallpaper-input" />
+            <input type="file" accept="image/*" hidden data-role="attachment-input" />
+            ${renderChatHeader(conversationId)}
+            <div class="chat-surface" ${wallpaperStyle}>
+              <div class="chat-scroll" data-role="chat-scroll">
+                ${getConversation(conversationId).map((message) => renderMessage(conversationId, message)).join("")}
+              </div>
+            </div>
+            ${renderChatComposer(conversationId)}
+          `
+      }
     </div>
   `;
 }
@@ -1511,14 +1785,53 @@ function mountComposer(root) {
 
 function mountSettingsInputs(root) {
   const worldbookInput = root.querySelector("[data-role='worldbook-input']");
+  const memoryCountInput = root.querySelector("[data-role='memory-count-input']");
+  const memoryManagementToggle = root.querySelector("[data-role='memory-management-toggle']");
+  const timeAwarenessToggle = root.querySelector("[data-role='time-awareness-toggle']");
+  const weatherAwarenessToggle = root.querySelector("[data-role='weather-awareness-toggle']");
+  const proactiveToggle = root.querySelector("[data-role='proactive-toggle']");
   const frequencySelect = root.querySelector("[data-role='frequency-select']");
+  const momentsToggle = root.querySelector("[data-role='moments-toggle']");
+  const momentsFrequencySelect = root.querySelector("[data-role='moments-frequency-select']");
   const blockToggle = root.querySelector("[data-role='block-toggle']");
+  const nicknameInput = root.querySelector("[data-role='nickname-input']");
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
   const apiModelInput = root.querySelector("[data-role='api-model-input']");
+
+  if (memoryCountInput) {
+    memoryCountInput.addEventListener("input", (event) => {
+      const nextValue = Math.min(120, Math.max(1, Number(event.target.value) || 30));
+      updateProfile(currentConversationId(), { memoryMessageCount: nextValue });
+    });
+  }
+
+  if (memoryManagementToggle) {
+    memoryManagementToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { intelligentMemoryManagement: event.target.checked });
+    });
+  }
 
   if (worldbookInput) {
     worldbookInput.addEventListener("input", (event) => {
       updateProfile(currentConversationId(), { worldbook: event.target.value });
+    });
+  }
+
+  if (timeAwarenessToggle) {
+    timeAwarenessToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { timeAwareness: event.target.checked });
+    });
+  }
+
+  if (weatherAwarenessToggle) {
+    weatherAwarenessToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { locationWeatherAwareness: event.target.checked });
+    });
+  }
+
+  if (proactiveToggle) {
+    proactiveToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { proactiveMessaging: event.target.checked });
     });
   }
 
@@ -1528,10 +1841,28 @@ function mountSettingsInputs(root) {
     });
   }
 
+  if (momentsToggle) {
+    momentsToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { momentsPosting: event.target.checked });
+    });
+  }
+
+  if (momentsFrequencySelect) {
+    momentsFrequencySelect.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { momentsFrequency: event.target.value });
+    });
+  }
+
   if (blockToggle) {
     blockToggle.addEventListener("change", (event) => {
       updateProfile(currentConversationId(), { isBlocked: event.target.checked });
       render();
+    });
+  }
+
+  if (nicknameInput) {
+    nicknameInput.addEventListener("input", (event) => {
+      updateProfile(currentConversationId(), { nicknameForUser: event.target.value });
     });
   }
 
@@ -1587,6 +1918,10 @@ function mountFileInputs(root) {
 }
 
 function scrollChatToBottom(root) {
+  if (appState.chatView !== "conversation") {
+    return;
+  }
+
   const chatScroll = root.querySelector("[data-role='chat-scroll']");
 
   if (chatScroll) {
@@ -1600,10 +1935,10 @@ function handleAction(action, button) {
     appState.activeScreen = "home";
     appState.messagesView = "list";
     appState.activeConversationId = null;
+    appState.chatView = "conversation";
     appState.isReplyPending = false;
     appState.draftMessage = "";
     appState.pendingAttachment = null;
-    appState.settingsOpen = false;
     appState.attachmentMenuOpen = false;
     render();
     return;
@@ -1613,7 +1948,7 @@ function handleAction(action, button) {
     appState.activeMessagesTab = button.dataset.tab || "chats";
     appState.messagesView = "list";
     appState.activeConversationId = null;
-    appState.settingsOpen = false;
+    appState.chatView = "conversation";
     appState.attachmentMenuOpen = false;
     render();
     return;
@@ -1641,6 +1976,19 @@ function handleAction(action, button) {
     return;
   }
 
+  if (action === "open-settings-screen") {
+    appState.chatView = "settings";
+    appState.attachmentMenuOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "close-settings-screen") {
+    appState.chatView = "conversation";
+    render();
+    return;
+  }
+
   if (action === "toggle-voice") {
     appState.isVoiceMode = !appState.isVoiceMode;
     render();
@@ -1654,19 +2002,6 @@ function handleAction(action, button) {
 
   if (action === "retry-message") {
     resendRequest(button.dataset.messageId);
-    return;
-  }
-
-  if (action === "toggle-settings") {
-    appState.settingsOpen = !appState.settingsOpen;
-    appState.attachmentMenuOpen = false;
-    render();
-    return;
-  }
-
-  if (action === "close-settings") {
-    appState.settingsOpen = false;
-    render();
     return;
   }
 
@@ -1688,6 +2023,14 @@ function handleAction(action, button) {
 
   if (action === "clear-attachment") {
     appState.pendingAttachment = null;
+    render();
+    return;
+  }
+
+  if (action === "clear-chat-records") {
+    const conversationId = currentConversationId();
+    setConversation(conversationId, []);
+    appState.isReplyPending = false;
     render();
   }
 }
