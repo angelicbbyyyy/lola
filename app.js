@@ -811,53 +811,7 @@ function buildOpenAIInput(conversationId) {
 
 async function callOpenAI(conversationId) {
   const activeApiProfile = getActiveApiProfile();
-
-  if (!activeApiProfile?.apiKey) {
-    throw new Error("Add an API profile and key in the central Settings app first.");
-  }
-
-  const baseUrl = String(activeApiProfile.apiUrl || "").trim().replace(/\/+$/, "");
-  let endpoint = "";
-  let requestBody = {};
-
-  if (activeApiProfile.requestFormat === "google-native" || activeApiProfile.providerPreset === "google") {
-    const model = activeApiProfile.model || "gemini-1.5-pro";
-    endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
-    requestBody = buildGoogleMessages(conversationId);
-  } else if (activeApiProfile.requestFormat === "anthropic" || activeApiProfile.providerPreset === "anthropic") {
-    endpoint = `${baseUrl}/messages`;
-    requestBody = {
-      model: activeApiProfile.model || "claude-3-5-sonnet-latest",
-      max_tokens: 1024,
-      ...buildAnthropicMessages(conversationId),
-    };
-  } else {
-    endpoint = `${baseUrl}/chat/completions`;
-    requestBody = {
-      model: activeApiProfile.model || "gpt-4.1-mini",
-      messages: buildOpenAICompatibleMessages(conversationId),
-    };
-  }
-
-  if (activeApiProfile.corsProxyUrl) {
-    endpoint = `${activeApiProfile.corsProxyUrl.replace(/\/+$/, "")}/${endpoint}`;
-  }
-
-  const response = await fetch(endpoint, buildApiRequestConfig(activeApiProfile, "POST", requestBody));
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(summarizeApiError(null, errorText || `Request failed with ${response.status}`));
-  }
-
-  const data = await response.json();
-
-  const assistantText = extractAssistantText(data, activeApiProfile);
-  if (assistantText) {
-    return assistantText;
-  }
-
-  throw new Error("The model returned an empty response.");
+  return executeProfileRequest(activeApiProfile, conversationId);
 }
 
 function receiveMessage(conversationId, responseText) {
@@ -1092,8 +1046,8 @@ function buildApiRequestConfig(profile, method = "GET", body) {
   };
 }
 
-function buildOpenAICompatibleMessages(conversationId) {
-  const input = buildOpenAIInput(conversationId);
+function buildOpenAICompatibleMessages(source) {
+  const input = Array.isArray(source) ? source : buildOpenAIInput(source);
   const systemItem = input.find((item) => item.role === "system");
   const messages = [];
 
@@ -1132,8 +1086,8 @@ function buildOpenAICompatibleMessages(conversationId) {
   return messages;
 }
 
-function buildAnthropicMessages(conversationId) {
-  const input = buildOpenAIInput(conversationId);
+function buildAnthropicMessages(source) {
+  const input = Array.isArray(source) ? source : buildOpenAIInput(source);
   const systemItem = input.find((item) => item.role === "system");
   const messages = [];
 
@@ -1172,8 +1126,8 @@ function buildAnthropicMessages(conversationId) {
   };
 }
 
-function buildGoogleMessages(conversationId) {
-  const input = buildOpenAIInput(conversationId);
+function buildGoogleMessages(source) {
+  const input = Array.isArray(source) ? source : buildOpenAIInput(source);
   const systemItem = input.find((item) => item.role === "system");
   const contents = [];
 
@@ -1291,6 +1245,70 @@ function summarizeApiError(error, responseText = "") {
   }
 
   return raw.replace(/^Error:\s*/i, "").slice(0, 220) || "Request failed.";
+}
+
+function buildTestInput(profile) {
+  const systemText =
+    `${profile.worldbook || "You are a soft, affectionate AI character in a love-chat app."}\n\n` +
+    `Reply in character, warmly and briefly, like a believable romantic chat partner.`;
+
+  return [
+    {
+      role: "system",
+      content: [{ type: "input_text", text: systemText }],
+    },
+    {
+      role: "user",
+      content: [{ type: "input_text", text: "Send one short in-character test reply so I know this profile works." }],
+    },
+  ];
+}
+
+async function executeProfileRequest(profile, sourceInput) {
+  if (!profile?.apiKey) {
+    throw new Error("Add an API profile and key in the central Settings app first.");
+  }
+
+  const baseUrl = String(profile.apiUrl || "").trim().replace(/\/+$/, "");
+  let endpoint = "";
+  let requestBody = {};
+
+  if (profile.requestFormat === "google-native" || profile.providerPreset === "google") {
+    const model = profile.model || "gemini-1.5-pro";
+    endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
+    requestBody = buildGoogleMessages(sourceInput);
+  } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
+    endpoint = `${baseUrl}/messages`;
+    requestBody = {
+      model: profile.model || "claude-3-5-sonnet-latest",
+      max_tokens: 1024,
+      ...buildAnthropicMessages(sourceInput),
+    };
+  } else {
+    endpoint = `${baseUrl}/chat/completions`;
+    requestBody = {
+      model: profile.model || "gpt-4.1-mini",
+      messages: buildOpenAICompatibleMessages(sourceInput),
+    };
+  }
+
+  if (profile.corsProxyUrl) {
+    endpoint = `${profile.corsProxyUrl.replace(/\/+$/, "")}/${endpoint}`;
+  }
+
+  const response = await fetch(endpoint, buildApiRequestConfig(profile, "POST", requestBody));
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(summarizeApiError(null, errorText || `Request failed with ${response.status}`));
+  }
+
+  const data = await response.json();
+  const assistantText = extractAssistantText(data, profile);
+  if (!assistantText) {
+    throw new Error("The model returned an empty response.");
+  }
+
+  return assistantText;
 }
 
 async function fetchModelsForDraft() {
@@ -1893,6 +1911,9 @@ function renderCentralSettingsScreen() {
                     <button type="button" class="central-settings-mini-button" data-action="fetch-models">Fetch Models</button>
                   </div>
                 </label>
+                <div class="central-settings-inline-actions">
+                  <button type="button" class="central-settings-mini-button central-settings-test" data-action="test-api-profile">Test Reply</button>
+                </div>
                 <label class="chat-settings-stack-row">
                   <span class="chat-settings-row-title">CORS Proxy URL</span>
                   <span class="chat-settings-row-detail">Optional. Use this if your browser blocks direct model fetches.</span>
@@ -2619,6 +2640,42 @@ function mountSettingsInputs(root) {
   }
 }
 
+async function testApiProfileDraft() {
+  ensureApiDraft();
+  const profile = appState.apiProfileDraft;
+  appState.apiConnectionState = {
+    status: "loading",
+    message: "Testing real character reply generation...",
+  };
+  render();
+
+  try {
+    const replyText = await executeProfileRequest(profile, buildTestInput(profile));
+    appState.apiProfileDraft = {
+      ...profile,
+      lastConnectionStatus: "success",
+      lastConnectionMessage: `Generation works: ${replyText.slice(0, 90)}${replyText.length > 90 ? "..." : ""}`,
+    };
+    appState.apiConnectionState = {
+      status: "success",
+      message: appState.apiProfileDraft.lastConnectionMessage,
+    };
+  } catch (error) {
+    const message = summarizeApiError(error);
+    appState.apiProfileDraft = {
+      ...profile,
+      lastConnectionStatus: "error",
+      lastConnectionMessage: message,
+    };
+    appState.apiConnectionState = {
+      status: "error",
+      message,
+    };
+  }
+
+  render();
+}
+
 function mountFileInputs(root) {
   const wallpaperInput = root.querySelector("[data-role='wallpaper-input']");
   const attachmentInput = root.querySelector("[data-role='attachment-input']");
@@ -2844,6 +2901,11 @@ function handleAction(action, button) {
 
   if (action === "fetch-models") {
     fetchModelsForDraft();
+    return;
+  }
+
+  if (action === "test-api-profile") {
+    testApiProfileDraft();
     return;
   }
 }
