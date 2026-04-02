@@ -967,9 +967,9 @@ function applyProviderPresetToProfile(profile, preset) {
     return {
       ...profile,
       providerPreset: "google",
-      requestFormat: "google-native",
+      requestFormat: "google-openai",
       googleAiStudioMode: true,
-      apiUrl: "https://generativelanguage.googleapis.com/v1beta",
+      apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     };
   }
 
@@ -1126,47 +1126,6 @@ function buildAnthropicMessages(source) {
   };
 }
 
-function buildGoogleMessages(source) {
-  const input = Array.isArray(source) ? source : buildOpenAIInput(source);
-  const systemItem = input.find((item) => item.role === "system");
-  const contents = [];
-
-  input
-    .filter((item) => item.role !== "system")
-    .forEach((item) => {
-      const parts = item.content.map((entry) => {
-        if (entry.type === "input_image") {
-          const [header, data] = String(entry.image_url || "").split(",");
-          const mediaTypeMatch = header.match(/data:(.*?);base64/);
-          return {
-            inlineData: {
-              mimeType: mediaTypeMatch?.[1] || "image/png",
-              data: data || "",
-            },
-          };
-        }
-
-        return {
-          text: entry.text,
-        };
-      });
-
-      contents.push({
-        role: item.role === "assistant" ? "model" : "user",
-        parts,
-      });
-    });
-
-  return {
-    systemInstruction: systemItem?.content?.[0]?.text
-      ? {
-          parts: [{ text: systemItem.content[0].text }],
-        }
-      : undefined,
-    contents,
-  };
-}
-
 function normalizeGoogleModelName(model) {
   const raw = String(model || "").trim();
   if (!raw) {
@@ -1188,17 +1147,21 @@ function normalizeGoogleModelName(model) {
   return cleaned.split("/").filter(Boolean).pop() || cleaned;
 }
 
-function extractAssistantText(data, profile) {
-  if (profile.requestFormat === "google-native" || profile.providerPreset === "google") {
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const text = parts
-      .map((item) => item.text || "")
-      .filter(Boolean)
-      .join("\n\n")
-      .trim();
-    return text;
+function normalizeGoogleBaseUrl(url) {
+  const raw = String(url || "").trim().replace(/\/+$/, "");
+  if (!raw) {
+    return "https://generativelanguage.googleapis.com/v1beta/openai";
   }
+  if (/\/openai$/i.test(raw)) {
+    return raw;
+  }
+  if (/generativelanguage\.googleapis\.com/i.test(raw)) {
+    return `${raw}/openai`;
+  }
+  return raw;
+}
 
+function extractAssistantText(data, profile) {
   if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     const textParts = (data.content || [])
       .filter((item) => item.type === "text" && item.text)
@@ -1290,14 +1253,20 @@ async function executeProfileRequest(profile, sourceInput) {
     throw new Error("Add an API profile and key in the central Settings app first.");
   }
 
-  const baseUrl = String(profile.apiUrl || "").trim().replace(/\/+$/, "");
+  const baseUrl =
+    profile.providerPreset === "google"
+      ? normalizeGoogleBaseUrl(profile.apiUrl)
+      : String(profile.apiUrl || "").trim().replace(/\/+$/, "");
   let endpoint = "";
   let requestBody = {};
 
-  if (profile.requestFormat === "google-native" || profile.providerPreset === "google") {
+  if (profile.providerPreset === "google") {
     const model = normalizeGoogleModelName(profile.model || "gemini-1.5-pro");
-    endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
-    requestBody = buildGoogleMessages(sourceInput);
+    endpoint = `${baseUrl}/chat/completions`;
+    requestBody = {
+      model,
+      messages: buildOpenAICompatibleMessages(sourceInput),
+    };
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     endpoint = `${baseUrl}/messages`;
     requestBody = {
@@ -1900,7 +1869,7 @@ function renderCentralSettingsScreen() {
                     <option value="local" ${draft.providerPreset === "local" ? "selected" : ""}>Local LLM</option>
                   </select>
                 </label>
-                ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Uses Gemini's native generateContent route with x-goog-api-key.")}
+                ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Uses Google AI Studio's OpenAI-compatible route with x-goog-api-key.")}
               </div>
             </section>
 
@@ -2547,7 +2516,8 @@ function mountSettingsInputs(root) {
         ? {
             ...nextDraft,
             providerPreset: "google",
-            apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+            requestFormat: "google-openai",
+            apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
           }
         : nextDraft;
       render();
