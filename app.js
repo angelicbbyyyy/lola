@@ -78,7 +78,8 @@ function imageMarkup(fileName, alt, extraClass = "", fallbackLabel = "IMG") {
       src="${assetPath(fileName)}"
       alt="${alt}"
       class="${extraClass}"
-      onerror="this.outerHTML='${createFallback(fallbackLabel, extraClass).replace(/'/g, "&apos;")}'"
+      data-fallback-label="${fallbackLabel}"
+      data-fallback-class="${extraClass}"
     />
   `;
 }
@@ -318,6 +319,21 @@ function wireInteractions(root) {
   });
 }
 
+function mountImageFallbacks(root) {
+  root.querySelectorAll("img[data-fallback-label]").forEach((image) => {
+    image.addEventListener(
+      "error",
+      () => {
+        const fallback = document.createElement("div");
+        fallback.className = `app-fallback ${image.dataset.fallbackClass || ""}`.trim();
+        fallback.textContent = image.dataset.fallbackLabel || "IMG";
+        image.replaceWith(fallback);
+      },
+      { once: true },
+    );
+  });
+}
+
 function formatLocalTime() {
   return new Intl.DateTimeFormat([], {
     hour: "2-digit",
@@ -356,6 +372,7 @@ function init() {
   }
 
   root.innerHTML = renderScreen();
+  mountImageFallbacks(root);
   wireInteractions(root);
   mountStatusClock(root);
 }
