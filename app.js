@@ -1086,6 +1086,55 @@ function buildOpenAICompatibleMessages(source) {
   return messages;
 }
 
+function buildGoogleCompatibleMessages(source) {
+  const input = Array.isArray(source) ? source : buildOpenAIInput(source);
+  const systemText = input.find((item) => item.role === "system")?.content?.[0]?.text || "";
+  const messages = [];
+
+  input
+    .filter((item) => item.role !== "system")
+    .forEach((item, index) => {
+      const textParts = item.content
+        .filter((entry) => entry.type === "input_text" && entry.text)
+        .map((entry) => entry.text.trim())
+        .filter(Boolean);
+
+      const imageParts = item.content.filter((entry) => entry.type === "input_image");
+      let content = textParts.join("\n\n");
+
+      if (index === 0 && systemText) {
+        content = `${systemText}\n\n${content}`.trim();
+      }
+
+      if (imageParts.length) {
+        const contentParts = [];
+        if (content) {
+          contentParts.push({ type: "text", text: content });
+        }
+        imageParts.forEach((entry) => {
+          contentParts.push({
+            type: "image_url",
+            image_url: {
+              url: entry.image_url,
+            },
+          });
+        });
+        messages.push({
+          role: item.role,
+          content: contentParts,
+        });
+        return;
+      }
+
+      messages.push({
+        role: item.role,
+        content: content || " ",
+      });
+    });
+
+  return messages;
+}
+
 function buildAnthropicMessages(source) {
   const input = Array.isArray(source) ? source : buildOpenAIInput(source);
   const systemItem = input.find((item) => item.role === "system");
@@ -1265,7 +1314,7 @@ async function executeProfileRequest(profile, sourceInput) {
     endpoint = `${baseUrl}/chat/completions`;
     requestBody = {
       model,
-      messages: buildOpenAICompatibleMessages(sourceInput),
+      messages: buildGoogleCompatibleMessages(sourceInput),
     };
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     endpoint = `${baseUrl}/messages`;
