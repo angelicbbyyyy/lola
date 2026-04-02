@@ -361,7 +361,7 @@ button {
   overflow: hidden;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 8px 28px rgba(36, 28, 16, 0.05);
+  box-shadow: 0 8px 28px rgba(79, 79, 79, 0.06);
 }
 
 .chat-row {
@@ -400,7 +400,7 @@ button {
   width: 50px;
   overflow: hidden;
   border-radius: 999px;
-  background: #f1ede7;
+  background: rgba(79, 79, 79, 0.08);
 }
 
 .chat-copy {
@@ -525,8 +525,8 @@ button {
 
 .contact-tag {
   border-radius: 999px;
-  background: #f6f3ee;
-  color: #a89f95;
+  background: rgba(79, 79, 79, 0.08);
+  color: var(--shell-text-soft);
   padding: 2px 7px;
   font-size: 10px;
   font-weight: 700;
@@ -652,7 +652,7 @@ button {
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.96);
   padding: 16px 18px;
-  box-shadow: 0 8px 24px rgba(36, 28, 16, 0.05);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
 }
 
 .moment-card p {
@@ -675,7 +675,7 @@ button {
   overflow: hidden;
   border-radius: 999px;
   margin-bottom: 10px;
-  box-shadow: 0 8px 20px rgba(36, 28, 16, 0.08);
+  box-shadow: 0 8px 20px rgba(79, 79, 79, 0.08);
 }
 
 .settings-profile h2 {
@@ -702,7 +702,7 @@ button {
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.96);
   padding: 10px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
-  box-shadow: 0 -2px 24px rgba(36, 28, 16, 0.04);
+  box-shadow: 0 -2px 24px rgba(79, 79, 79, 0.05);
 }
 
 .messages-tab {
@@ -885,7 +885,7 @@ button {
   padding: 12px 14px;
   letter-spacing: -0.01em;
   color: var(--shell-text);
-  box-shadow: 0 8px 22px rgba(47, 36, 18, 0.05);
+  box-shadow: 0 8px 22px rgba(79, 79, 79, 0.05);
 }
 
 .message-bubble p {
@@ -1167,7 +1167,7 @@ button {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(54, 44, 34, 0.16);
+  background: rgba(79, 79, 79, 0.14);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   padding: 18px 0 calc(env(safe-area-inset-bottom, 0px) + 10px);
@@ -1177,9 +1177,9 @@ button {
   width: 100%;
   max-width: 100%;
   border-radius: 28px 28px 0 0;
-  background: rgba(252, 249, 246, 0.98);
+  background: rgba(247, 247, 247, 0.98);
   padding: 18px 16px 18px;
-  box-shadow: 0 -10px 30px rgba(36, 28, 16, 0.1);
+  box-shadow: 0 -10px 30px rgba(79, 79, 79, 0.1);
 }
 
 .settings-sheet,
