@@ -82,6 +82,36 @@ input {
   object-fit: cover;
 }
 
+.status-time {
+  display: inline-flex;
+  align-items: center;
+  min-width: 3.9ch;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.055em;
+  color: #1d1f2b;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.status-time.reference-mode {
+  position: relative;
+}
+
+.status-time.reference-mode::after {
+  content: "";
+  position: absolute;
+  inset: -6px -10px;
+  background-image: url("./assets/Time-2.png");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .app-button {
   width: 100%;
   background: transparent;

@@ -250,7 +250,7 @@ function renderScreen() {
     <div class="phone-shell">
       <div class="shell-inner">
         <header class="mb-5 flex items-center justify-between px-[4px] pt-1">
-          <div id="status-time" class="text-[15px] font-semibold tracking-[-0.02em]">--:--</div>
+          <div id="status-time" class="status-time reference-mode">--:--</div>
           <div class="flex h-5 items-center gap-1.5">
             <div class="h-[11px] w-[18px]">
               ${imageMarkup(homeConfig.status.signalImage, "Mobile signal", "h-full w-full object-contain", "SIG")}
