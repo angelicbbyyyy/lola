@@ -2125,6 +2125,15 @@ function buildGoogleCompatibleMessages(source) {
       });
     });
 
+  if (contents.length === 1 && contents[0]?.role === "model") {
+    delete contents[0].role;
+  } else if (contents.length && contents[contents.length - 1]?.role === "model") {
+    contents.push({
+      role: "user",
+      parts: [{ text: "Respond naturally to the latest conversation state." }],
+    });
+  }
+
   return {
     system_instruction: systemText
       ? {
