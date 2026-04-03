@@ -1785,18 +1785,18 @@ function renderChatsTab() {
   return `
     <div class="messages-pane">
       ${renderMessagesHeader("Chats")}
-      <section class="messages-list-card">
+      <div class="chat-rows-list">
         ${
           rows.length
             ? rows.join("")
             : `
-              <div class="messages-empty">
+              <div class="messages-empty messages-empty-card">
                 <div class="messages-empty-title">No chats yet</div>
                 <p>Create or restore a character to start a conversation.</p>
               </div>
             `
         }
-      </section>
+      </div>
     </div>
   `;
 }

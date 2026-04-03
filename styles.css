@@ -367,25 +367,20 @@ button {
   box-shadow: 0 8px 28px rgba(79, 79, 79, 0.06);
 }
 
+.chat-rows-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .chat-row {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 0;
   padding-right: 12px;
-}
-
-.chat-row::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 70px;
-  border-bottom: 0.5px solid rgba(0, 0, 0, 0.05);
-}
-
-.chat-row:last-child::after {
-  display: none;
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 16px rgba(79, 79, 79, 0.07);
 }
 
 .chat-row-main {
