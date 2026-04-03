@@ -1,6 +1,8 @@
 const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
 const STORAGE_BACKUP_KEY = "lola_chat_engine_v1_backup";
+const STORAGE_SNAPSHOT_INDEX_KEY = "lola_chat_engine_v1_snapshots";
+const STORAGE_SNAPSHOT_PREFIX = "lola_chat_engine_v1_snapshot_";
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
@@ -359,6 +361,15 @@ function tryParseStoredJson(raw) {
   }
 }
 
+function readSnapshotIndex() {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(STORAGE_SNAPSHOT_INDEX_KEY));
+  return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+}
+
+function writeSnapshotIndex(keys) {
+  window.localStorage.setItem(STORAGE_SNAPSHOT_INDEX_KEY, JSON.stringify(keys));
+}
+
 function latestTimestampFromItems(items) {
   if (!Array.isArray(items) || !items.length) {
     return 0;
@@ -537,16 +548,25 @@ function loadChatState() {
   try {
     const rawPrimary = window.localStorage.getItem(STORAGE_KEY);
     const rawBackup = window.localStorage.getItem(STORAGE_BACKUP_KEY);
+    const snapshotKeys = readSnapshotIndex();
+    const parsedSnapshots = snapshotKeys
+      .map((key) => tryParseStoredJson(window.localStorage.getItem(key)))
+      .filter(Boolean);
     const parsedPrimary = tryParseStoredJson(rawPrimary);
     const parsedBackup = tryParseStoredJson(rawBackup);
 
-    if (!parsedPrimary && !parsedBackup) {
+    if (!parsedPrimary && !parsedBackup && !parsedSnapshots.length) {
       return defaults;
     }
 
-    const merged = mergeTwoRawSnapshots(parsedPrimary, parsedBackup);
+    const merged = [parsedPrimary, parsedBackup, ...parsedSnapshots].filter(Boolean).reduce((accumulator, snapshot) => {
+      if (!accumulator) {
+        return snapshot;
+      }
+      return mergeTwoRawSnapshots(accumulator, snapshot);
+    }, null);
     const state = normalizePersistedSnapshot(defaults, merged);
-    if (parsedPrimary && !rawBackup) {
+    if ((parsedPrimary && !rawBackup) || parsedSnapshots.length) {
       try {
         writeStoragePayload(JSON.stringify(state));
       } catch (_error) {
@@ -595,6 +615,21 @@ function writeStoragePayload(json) {
     window.localStorage.setItem(STORAGE_BACKUP_KEY, json);
   } catch (_error) {
     // Best-effort mirror; some browsers may only fit one copy within quota.
+  }
+
+  try {
+    const parsed = tryParseStoredJson(json);
+    const snapshotTimestamp = Number(parsed?.updatedAt) || Date.now();
+    const snapshotKey = `${STORAGE_SNAPSHOT_PREFIX}${snapshotTimestamp}`;
+    window.localStorage.setItem(snapshotKey, json);
+    const existingKeys = readSnapshotIndex().filter((key) => key !== snapshotKey);
+    const nextKeys = [snapshotKey, ...existingKeys].slice(0, 8);
+    writeSnapshotIndex(nextKeys);
+    existingKeys.slice(7).forEach((staleKey) => {
+      window.localStorage.removeItem(staleKey);
+    });
+  } catch (_error) {
+    // Immutable recovery snapshots are best-effort.
   }
 }
 
