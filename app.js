@@ -15,7 +15,10 @@ const DB_STORE = "state";
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
-const FIXED_CHARACTER_SYSTEM_PROMPT = `Stay in character. Reply like a real person texting, not a writer. Keep replies short. No narration or roleplay prose. Use [BREAK] only when sending separate thoughts. React naturally with subtext, slight imperfections, and your own emotional agenda.`;
+const FIXED_CHARACTER_SYSTEM_PROMPT = `Stay in character. Reply like a real person texting, not a writer. Keep replies short.
+No Flowery Roleplay: Do not use poetic, theatrical, or descriptive actions. Communicate strictly through text.
+Always stay in character. Do not narrate; just text back. Text like a real human, with emotions, typos.
+When you have multiple thoughts or a longer reply, separate each distinct sentence or thought with the exact tag [BREAK]. Do not use new lines for this behavior; only use the [BREAK] tag.`;
 
 const appState = {
   activeScreen: "home",
