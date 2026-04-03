@@ -2311,6 +2311,22 @@ function receiveMessage(conversationId, responseText) {
   }
 }
 
+function appendProcessedAiMessage(conversationId, responseText, metaType = "assistant") {
+  const processed = processAIResponse(responseText);
+  appendMessage(
+    conversationId,
+    createMessage({
+      role: "ai",
+      text: processed.text,
+      timestamp: formatLocalTime(),
+      status: "delivered",
+      metaType,
+      bubbleParts: processed.bubbleParts,
+      revealedBubbleCount: processed.bubbleParts.length || (processed.text ? 1 : 0),
+    }),
+  );
+}
+
 function scheduleMemoryMaintenance(conversationId) {
   window.setTimeout(() => {
     maybeRunMemoryMaintenance(conversationId);
@@ -3050,16 +3066,7 @@ async function maybeSimulateCharacterActivity() {
       automationLocks.add(`proactive:${profile.id}`);
       try {
         const proactiveText = await requestGeneratedProactiveMessage(profile.id);
-        appendMessage(
-          profile.id,
-          createMessage({
-            role: "ai",
-            text: proactiveText,
-            timestamp: formatLocalTime(),
-            status: "delivered",
-            metaType: "spontaneous",
-          }),
-        );
+        appendProcessedAiMessage(profile.id, proactiveText, "spontaneous");
         if (appState.activeConversationId === profile.id && appState.messagesView === "chat") {
           render();
         }
