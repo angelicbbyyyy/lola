@@ -799,9 +799,6 @@ function sendStickerMessage(conversationId, sticker) {
     stickerDescription: sticker.description,
   });
   appendMessage(conversationId, outgoingMessage);
-  window.setTimeout(() => {
-    maybeRunMemoryMaintenance(conversationId);
-  }, 0);
   appState.stickerPickerOpen = false;
 }
 
@@ -1815,6 +1812,12 @@ function receiveMessage(conversationId, responseText) {
   appendAiStickerForReply(conversationId, responseText);
 }
 
+function scheduleMemoryMaintenance(conversationId) {
+  window.setTimeout(() => {
+    maybeRunMemoryMaintenance(conversationId);
+  }, 600);
+}
+
 async function requestAIResponse(conversationId, messageId) {
   appState.isReplyPending = true;
   addTypingMessage(conversationId);
@@ -1842,6 +1845,7 @@ async function requestAIResponse(conversationId, messageId) {
     }));
   } finally {
     appState.isReplyPending = false;
+    scheduleMemoryMaintenance(conversationId);
     render();
   }
 }
@@ -1882,9 +1886,6 @@ async function sendMessage(conversationId, draft = appState.draftMessage, attach
     });
 
     appendMessage(conversationId, outgoingMessage);
-    window.setTimeout(() => {
-      maybeRunMemoryMaintenance(conversationId);
-    }, 0);
     targetMessageId = outgoingMessage.id;
     appState.draftMessage = "";
     appState.pendingAttachment = null;
@@ -2220,8 +2221,17 @@ function extractAssistantText(data, profile) {
     if (candidate?.finishReason === "SAFETY") {
       throw new Error("The model declined to respond due to safety filters. Try rephrasing your message.");
     }
-    if (candidate?.content?.parts) {
-      return candidate.content.parts.map((p) => p.text || "").join("").trim();
+    if (data.promptFeedback?.blockReason) {
+      throw new Error(`The model blocked the prompt: ${data.promptFeedback.blockReason}.`);
+    }
+    const candidateText = (data.candidates || [])
+      .flatMap((entry) => entry?.content?.parts || [])
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .filter((text) => text.trim())
+      .join("\n\n")
+      .trim();
+    if (candidateText) {
+      return candidateText;
     }
     return "";
   }
@@ -2256,6 +2266,31 @@ function extractAssistantText(data, profile) {
   }
 
   return "";
+}
+
+function describeEmptyResponse(data, profile) {
+  if (profile.providerPreset === "google" || data?.candidates) {
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason) {
+      return `Google finishReason: ${candidate.finishReason}.`;
+    }
+    if (data?.promptFeedback?.blockReason) {
+      return `Google block reason: ${data.promptFeedback.blockReason}.`;
+    }
+  }
+
+  if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
+    if (data?.stop_reason) {
+      return `Claude stop reason: ${data.stop_reason}.`;
+    }
+  }
+
+  if (data?.choices?.[0]?.finish_reason) {
+    return `Finish reason: ${data.choices[0].finish_reason}.`;
+  }
+
+  const compact = JSON.stringify(data || {}).slice(0, 220);
+  return compact ? `Response preview: ${compact}` : "";
 }
 
 function summarizeApiError(error, responseText = "") {
@@ -2357,7 +2392,7 @@ async function executeProfileRequest(profile, sourceInput) {
   const data = await response.json();
   const assistantText = extractAssistantText(data, profile);
   if (!assistantText) {
-    throw new Error("The model returned an empty response.");
+    throw new Error(`The model returned an empty response. ${describeEmptyResponse(data, profile)}`.trim());
   }
 
   return assistantText;
