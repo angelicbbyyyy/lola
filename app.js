@@ -238,6 +238,7 @@ function syncMessageSequence() {
 
 function createDefaultPersistedState() {
   return {
+    updatedAt: Date.now(),
     appSettings: {
       activeApiProfileId: "openai-default",
       lastActiveConversationId: "angel-bunny",
@@ -358,9 +359,29 @@ function tryParseStoredJson(raw) {
   }
 }
 
-function pickLongerArray(a, b) {
+function latestTimestampFromItems(items) {
+  if (!Array.isArray(items) || !items.length) {
+    return 0;
+  }
+  return items.reduce((maxValue, item) => {
+    const numericValue =
+      Number(item?.updatedAt) ||
+      Number(item?.createdAt) ||
+      Number(item?.timestamp) ||
+      Number(item?.lastUserMessageAt) ||
+      0;
+    return Math.max(maxValue, numericValue);
+  }, 0);
+}
+
+function pickFresherArray(a, b) {
   const ar = Array.isArray(a) ? a : [];
   const br = Array.isArray(b) ? b : [];
+  const aFreshness = latestTimestampFromItems(ar);
+  const bFreshness = latestTimestampFromItems(br);
+  if (aFreshness !== bFreshness) {
+    return aFreshness >= bFreshness ? ar : br;
+  }
   return ar.length >= br.length ? ar : br;
 }
 
@@ -372,7 +393,7 @@ function mergeConversationMessageLists(primary, backup) {
   for (const id of keys) {
     const a = Array.isArray(p[id]) ? p[id] : [];
     const b = Array.isArray(q[id]) ? q[id] : [];
-    out[id] = a.length >= b.length ? a : b;
+    out[id] = pickFresherArray(a, b);
   }
   return out;
 }
@@ -385,9 +406,22 @@ function mergeKeyedArrays(primary, backup) {
   for (const id of keys) {
     const a = Array.isArray(p[id]) ? p[id] : [];
     const b = Array.isArray(q[id]) ? q[id] : [];
-    out[id] = a.length >= b.length ? a : b;
+    out[id] = pickFresherArray(a, b);
   }
   return out;
+}
+
+function snapshotFreshness(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return 0;
+  }
+  return (
+    Number(snapshot.updatedAt) ||
+    Number(snapshot.appSettings?.updatedAt) ||
+    latestTimestampFromItems(Object.values(snapshot.conversations || {}).flat()) ||
+    latestTimestampFromItems(snapshot.momentsPosts || []) ||
+    0
+  );
 }
 
 function mergeTwoRawSnapshots(primary, backup) {
@@ -397,31 +431,73 @@ function mergeTwoRawSnapshots(primary, backup) {
   if (!backup) {
     return primary;
   }
+  const primaryFreshness = snapshotFreshness(primary);
+  const backupFreshness = snapshotFreshness(backup);
+  const preferred = primaryFreshness >= backupFreshness ? primary : backup;
+  const fallback = preferred === primary ? backup : primary;
   return {
+    updatedAt: Math.max(primaryFreshness, backupFreshness, Date.now()),
     appSettings: {
-      ...(backup.appSettings || {}),
-      ...(primary.appSettings || {}),
+      ...(fallback.appSettings || {}),
+      ...(preferred.appSettings || {}),
       apiProfiles: {
-        ...(backup.appSettings?.apiProfiles || {}),
-        ...(primary.appSettings?.apiProfiles || {}),
+        ...(fallback.appSettings?.apiProfiles || {}),
+        ...(preferred.appSettings?.apiProfiles || {}),
       },
     },
     characterProfiles: {
-      ...(backup.characterProfiles || {}),
-      ...(primary.characterProfiles || {}),
+      ...(fallback.characterProfiles || {}),
+      ...(preferred.characterProfiles || {}),
     },
-    conversations: mergeConversationMessageLists(primary.conversations, backup.conversations),
-    momentsPosts: pickLongerArray(primary.momentsPosts, backup.momentsPosts),
-    favoritesLibrary: { ...(backup.favoritesLibrary || {}), ...(primary.favoritesLibrary || {}) },
-    memories: mergeKeyedArrays(primary.memories, backup.memories),
-    conversationArchives: mergeKeyedArrays(primary.conversationArchives, backup.conversationArchives),
-    stickerPacks: pickLongerArray(primary.stickerPacks, backup.stickerPacks),
+    conversations: mergeConversationMessageLists(preferred.conversations, fallback.conversations),
+    momentsPosts: pickFresherArray(preferred.momentsPosts, fallback.momentsPosts),
+    favoritesLibrary: { ...(fallback.favoritesLibrary || {}), ...(preferred.favoritesLibrary || {}) },
+    memories: mergeKeyedArrays(preferred.memories, fallback.memories),
+    conversationArchives: mergeKeyedArrays(preferred.conversationArchives, fallback.conversationArchives),
+    stickerPacks: pickFresherArray(preferred.stickerPacks, fallback.stickerPacks),
   };
 }
 
 function normalizePersistedSnapshot(defaults, parsed) {
   const parsedProfiles = parsed.appSettings?.apiProfiles || {};
+  const usedIds = new Set();
+  let fallbackId = 6;
+  const normalizedConversations = Object.fromEntries(
+    Object.entries({
+      ...defaults.conversations,
+      ...(parsed.conversations || {}),
+    }).map(([conversationId, messages]) => [
+      conversationId,
+      (Array.isArray(messages) ? messages : []).map((message) => {
+        const match = String(message?.id || "").match(/^m-(\d+)$/);
+        let id = String(message?.id || "");
+        if (!match || usedIds.has(id)) {
+          while (usedIds.has(`m-${fallbackId}`)) {
+            fallbackId += 1;
+          }
+          id = `m-${fallbackId++}`;
+        } else {
+          fallbackId = Math.max(fallbackId, Number(match[1]) + 1);
+        }
+        usedIds.add(id);
+        const bubbleParts = Array.isArray(message?.bubbleParts)
+          ? message.bubbleParts.filter((entry) => String(entry || "").trim())
+          : [];
+        return {
+          ...message,
+          id,
+          createdAt: Number(message?.createdAt) || Date.now(),
+          bubbleParts,
+          revealedBubbleCount:
+            message?.role === "ai" && bubbleParts.length
+              ? bubbleParts.length
+              : Number(message?.revealedBubbleCount) || 0,
+        };
+      }),
+    ]),
+  );
   return {
+    updatedAt: Number(parsed.updatedAt) || Date.now(),
     appSettings: {
       ...defaults.appSettings,
       ...(parsed.appSettings || {}),
@@ -443,10 +519,7 @@ function normalizePersistedSnapshot(defaults, parsed) {
         }).map(([id, profile]) => [id, normalizeProfile(profile, defaults.characterProfiles["angel-bunny"])]),
       ),
     },
-    conversations: {
-      ...defaults.conversations,
-      ...(parsed.conversations || {}),
-    },
+    conversations: normalizedConversations,
     momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
     favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
     stickerPacks: Array.isArray(parsed.stickerPacks) ? parsed.stickerPacks : defaults.stickerPacks,
@@ -527,6 +600,7 @@ function writeStoragePayload(json) {
 
 function saveChatState() {
   try {
+    persistedState.updatedAt = Date.now();
     writeStoragePayload(JSON.stringify(persistedState));
     appState.storageWarningMessage = "";
   } catch (error) {
