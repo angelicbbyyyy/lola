@@ -423,6 +423,9 @@ function createNewCharacterDraft() {
 }
 
 function assetPath(fileName) {
+  if (typeof fileName === "string" && /^(data:|blob:|https?:)/.test(fileName)) {
+    return fileName;
+  }
   return `${ASSET_BASE}/${fileName}`;
 }
 
@@ -1893,6 +1896,15 @@ function renderCharacterEditorScreen() {
         </div>
       </section>
 
+      <input type="file" accept="image/*" hidden data-role="character-avatar-input" />
+
+      <section class="character-editor-group">
+        <button type="button" class="character-avatar-button" data-action="pick-character-avatar">
+          <span class="chat-settings-row-title">Change Profile Picture</span>
+          <span class="chat-settings-row-detail">Upload a local image to use as this character's avatar throughout the app.</span>
+        </button>
+      </section>
+
       <section class="character-editor-group">
         <label class="chat-settings-stack-row">
           <span class="chat-settings-row-title">Display Name</span>
@@ -2953,6 +2965,7 @@ async function testApiProfileDraft() {
 function mountFileInputs(root) {
   const wallpaperInput = root.querySelector("[data-role='wallpaper-input']");
   const attachmentInput = root.querySelector("[data-role='attachment-input']");
+  const characterAvatarInput = root.querySelector("[data-role='character-avatar-input']");
 
   if (wallpaperInput) {
     wallpaperInput.addEventListener("change", async (event) => {
@@ -2981,6 +2994,22 @@ function mountFileInputs(root) {
         dataUrl,
       };
       appState.attachmentMenuOpen = false;
+      render();
+    });
+  }
+
+  if (characterAvatarInput) {
+    characterAvatarInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      const dataUrl = await readFileAsDataUrl(file);
+      appState.characterDraft = {
+        ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
+        avatar: dataUrl,
+      };
       render();
     });
   }
@@ -3105,6 +3134,11 @@ function handleAction(action, button) {
     return;
   }
 
+  if (action === "pick-character-avatar") {
+    rootNode?.querySelector("[data-role='character-avatar-input']")?.click();
+    return;
+  }
+
   if (action === "toggle-attachment-menu") {
     appState.attachmentMenuOpen = !appState.attachmentMenuOpen;
     render();
@@ -3138,6 +3172,7 @@ function handleAction(action, button) {
       id: profileId,
       name: draft.name || existing.name || "New Character",
       aiNickname: draft.aiNickname || draft.name || existing.name || "New Character",
+      avatar: draft.avatar || existing.avatar,
       characterPrompt: draft.characterPrompt || "",
       worldbook: draft.characterPrompt || draft.worldbook || "",
       useGlobalWordbook: !!draft.useGlobalWordbook,
