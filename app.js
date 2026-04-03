@@ -43,6 +43,9 @@ const appState = {
   stickerPackDraft: null,
   activeStickerPackId: null,
   stickerPickerOpen: false,
+  memoryCharacterFilter: "all",
+  memoryCategoryFilter: "all",
+  memorySearchQuery: "",
 };
 
 const automationLocks = new Set();
@@ -251,8 +254,9 @@ function createDefaultPersistedState() {
         characterPrompt:
           "You are Angel Bunny. Speak gently, intimately, and a little clingy, like a soft WeChat romance sim character. Stay emotionally aware, affectionate, and reactive. Keep responses concise unless the user is emotional or sends an image.",
         useGlobalWordbook: false,
-        memoryMessageCount: 30,
+        memoryMessageCount: 20,
         intelligentMemoryManagement: true,
+        memoryExtractionCount: 0,
         timeAwareness: true,
         locationWeatherAwareness: false,
         proactiveMessaging: true,
@@ -293,6 +297,8 @@ function createDefaultPersistedState() {
     ],
     favoritesLibrary: {},
     stickerPacks: [],
+    memories: {},
+    conversationArchives: {},
   };
 }
 
@@ -317,6 +323,7 @@ function normalizeProfile(profile, defaults) {
     lastMomentPostAt: Number(profile?.lastMomentPostAt) || defaults.lastMomentPostAt || 0,
     allowAiStickers: typeof profile?.allowAiStickers === "boolean" ? profile.allowAiStickers : defaults.allowAiStickers || false,
     aiStickerFrequency: profile?.aiStickerFrequency === "high" ? "high" : defaults.aiStickerFrequency || "low",
+    memoryExtractionCount: Number(profile?.memoryExtractionCount) || defaults.memoryExtractionCount || 0,
     ...profile,
   };
 }
@@ -357,6 +364,11 @@ function loadChatState() {
       momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
       favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
       stickerPacks: Array.isArray(parsed.stickerPacks) ? parsed.stickerPacks : defaults.stickerPacks,
+      memories: parsed.memories && typeof parsed.memories === "object" ? parsed.memories : defaults.memories,
+      conversationArchives:
+        parsed.conversationArchives && typeof parsed.conversationArchives === "object"
+          ? parsed.conversationArchives
+          : defaults.conversationArchives,
     };
   } catch (error) {
     console.warn("Unable to load saved chat state:", error);
@@ -399,6 +411,88 @@ function saveChatState() {
   } catch (error) {
     console.warn("Unable to save chat state:", error);
   }
+}
+
+function getMemories(characterId) {
+  const source = persistedState.memories || {};
+  if (!characterId || characterId === "all") {
+    return source;
+  }
+  return Array.isArray(source[characterId]) ? source[characterId] : [];
+}
+
+function getConversationArchives(characterId) {
+  const source = persistedState.conversationArchives || {};
+  if (!characterId || characterId === "all") {
+    return source;
+  }
+  return Array.isArray(source[characterId]) ? source[characterId] : [];
+}
+
+function setMemories(characterId, memories) {
+  persistedState.memories = {
+    ...(persistedState.memories || {}),
+    [characterId]: memories,
+  };
+  saveChatState();
+}
+
+function setConversationArchives(characterId, archives) {
+  persistedState.conversationArchives = {
+    ...(persistedState.conversationArchives || {}),
+    [characterId]: archives,
+  };
+  saveChatState();
+}
+
+function normalizeMemoryCategory(rawValue) {
+  const value = String(rawValue || "")
+    .trim()
+    .toLowerCase();
+
+  if (!value) {
+    return "timeline";
+  }
+
+  if (/(bio|profile|identity|personal)/.test(value)) {
+    return "bio";
+  }
+  if (/(like|love|hate|dislike|preference|hobby|taste|food|music)/.test(value)) {
+    return "likes";
+  }
+  if (/(secret|fear|trauma|deep|private|confession)/.test(value)) {
+    return "secrets";
+  }
+  return "timeline";
+}
+
+function memoryCategoryMeta(category) {
+  const normalized = normalizeMemoryCategory(category);
+  const map = {
+    bio: { label: "Bio", emoji: "👤", className: "is-bio" },
+    likes: { label: "Likes/Dislikes", emoji: "❤️", className: "is-likes" },
+    timeline: { label: "Timeline", emoji: "📅", className: "is-timeline" },
+    secrets: { label: "Secrets", emoji: "🔑", className: "is-secrets" },
+  };
+  return map[normalized];
+}
+
+function nextMemoryId() {
+  return `memory-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function nextArchiveId() {
+  return `archive-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function formatMemoryTimestamp(timestamp) {
+  const value = Number(timestamp) || Date.now();
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function ensureConversation(id) {
@@ -670,29 +764,30 @@ function appendAiStickerForReply(conversationId, replyText) {
 }
 
 function sendStickerMessage(conversationId, sticker) {
-  appendMessage(
-    conversationId,
-    createMessage({
-      role: "user",
+  const outgoingMessage = createMessage({
+    role: "user",
+    text: "",
+    timestamp: formatLocalTime(),
+    status: "sent",
+    attempts: 1,
+    requestPayload: {
       text: "",
-      timestamp: formatLocalTime(),
-      status: "sent",
-      attempts: 1,
-      requestPayload: {
-        text: "",
-        imageDataUrl: "",
-        stickerId: sticker.id,
-        stickerName: sticker.name,
-        stickerDescription: sticker.description,
-      },
-      metaType: "user-sticker",
+      imageDataUrl: "",
       stickerId: sticker.id,
-      stickerPackId: sticker.packId,
-      stickerImageDataUrl: sticker.imageDataUrl,
       stickerName: sticker.name,
       stickerDescription: sticker.description,
-    }),
-  );
+    },
+    metaType: "user-sticker",
+    stickerId: sticker.id,
+    stickerPackId: sticker.packId,
+    stickerImageDataUrl: sticker.imageDataUrl,
+    stickerName: sticker.name,
+    stickerDescription: sticker.description,
+  });
+  appendMessage(conversationId, outgoingMessage);
+  window.setTimeout(() => {
+    maybeRunMemoryMaintenance(conversationId);
+  }, 0);
   appState.stickerPickerOpen = false;
 }
 
@@ -993,6 +1088,231 @@ function formatElapsedContext(timestamp) {
   return `It has been about ${hours} hour${hours === 1 ? "" : "s"} and ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} since the user last replied.`;
 }
 
+function recentLiveMessages(conversationId, limit = 20) {
+  return getConversation(conversationId)
+    .filter(
+      (message) =>
+        !message.typing &&
+        !message.failed &&
+        message.metaType !== "assistant-sticker" &&
+        message.metaType !== "archive-placeholder",
+    )
+    .slice(-limit);
+}
+
+function injectMemoryContext(characterId) {
+  const memories = getMemories(characterId)
+    .slice(-12)
+    .map((entry) => `${memoryCategoryMeta(entry.category).label}: ${entry.fact}`);
+  const archives = getConversationArchives(characterId)
+    .slice(-3)
+    .map((entry) => entry.summary);
+  const sections = [];
+
+  if (memories.length) {
+    sections.push(`You remember these facts about the user:\n- ${memories.join("\n- ")}`);
+  }
+
+  if (archives.length) {
+    sections.push(`Summary of relationship history:\n- ${archives.join("\n- ")}`);
+  }
+
+  return sections.join("\n\n");
+}
+
+function extractJsonCandidate(text) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned || /^null$/i.test(cleaned)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_error) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    try {
+      return JSON.parse(match[0]);
+    } catch (_nestedError) {
+      return null;
+    }
+  }
+}
+
+function dedupeMemoryNotes(existingNotes, nextNote) {
+  const normalizedFact = String(nextNote.fact || "")
+    .trim()
+    .toLowerCase();
+  if (!normalizedFact) {
+    return true;
+  }
+
+  return existingNotes.some(
+    (entry) =>
+      String(entry.fact || "")
+        .trim()
+        .toLowerCase() === normalizedFact,
+  );
+}
+
+async function extractMemory(characterId) {
+  const lockKey = `memory-extract:${characterId}`;
+  if (automationLocks.has(lockKey) || !canUseActiveApiProfile()) {
+    return null;
+  }
+
+  const recentSlice = recentLiveMessages(characterId, 5);
+  if (!recentSlice.length) {
+    return null;
+  }
+
+  automationLocks.add(lockKey);
+  try {
+    const transcript = recentSlice
+      .map((message) => `${message.role === "ai" ? "Character" : "User"}: ${buildMessageTextForModel(message)}`)
+      .join("\n");
+    const response = await executeProfileRequest(getActiveApiProfile(), [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              'Review the recent chat slice and extract only one concrete personal fact, preference, important event, or secret if the user revealed one. Return only JSON like {"fact":"string","category":"bio|likes|timeline|secrets"} or NULL. Keep "fact" under 10 words. Do not invent facts.',
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: transcript }],
+      },
+    ]);
+    const parsed = extractJsonCandidate(response);
+    if (!parsed?.fact) {
+      return null;
+    }
+
+    const memories = getMemories(characterId);
+    const nextNote = {
+      id: nextMemoryId(),
+      characterId,
+      fact: String(parsed.fact).trim().slice(0, 140),
+      category: normalizeMemoryCategory(parsed.category),
+      timestamp: Date.now(),
+      sourceMessageIds: recentSlice.map((entry) => entry.id),
+    };
+
+    if (dedupeMemoryNotes(memories, nextNote)) {
+      return null;
+    }
+
+    setMemories(characterId, [nextNote, ...memories].slice(0, 120));
+    return nextNote;
+  } catch (error) {
+    console.warn("Memory extraction failed:", error);
+    return null;
+  } finally {
+    automationLocks.delete(lockKey);
+  }
+}
+
+function buildArchivePlaceholder(summary) {
+  return createMessage({
+    role: "ai",
+    text: `Summary of chat history: ${summary}`,
+    timestamp: formatLocalTime(),
+    status: "delivered",
+    metaType: "archive-placeholder",
+  });
+}
+
+async function summarizeConversationChunk(characterId) {
+  const lockKey = `memory-summary:${characterId}`;
+  if (automationLocks.has(lockKey) || !canUseActiveApiProfile()) {
+    return null;
+  }
+
+  const messages = getConversation(characterId);
+  const compressible = messages.filter(
+    (message) =>
+      !message.typing &&
+      !message.failed &&
+      message.metaType !== "assistant-sticker" &&
+      message.metaType !== "archive-placeholder",
+  );
+
+  if (compressible.length < 50) {
+    return null;
+  }
+
+  const targetChunk = compressible.slice(0, 50);
+  automationLocks.add(lockKey);
+  try {
+    const transcript = targetChunk
+      .map((message) => `${message.role === "ai" ? "Character" : "User"}: ${buildMessageTextForModel(message)}`)
+      .join("\n");
+    const summary = await executeProfileRequest(getActiveApiProfile(), [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "Summarize this relationship/chat chunk in one compact paragraph. Focus on important emotional shifts, plans, preferences, and recurring topics. Do not narrate as an assistant. Return plain text only.",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: transcript }],
+      },
+    ]);
+
+    const cleanSummary = String(summary || "").trim();
+    if (!cleanSummary) {
+      return null;
+    }
+
+    const archives = getConversationArchives(characterId);
+    const archiveEntry = {
+      id: nextArchiveId(),
+      characterId,
+      summary: cleanSummary,
+      timestamp: Date.now(),
+      messageCountCompressed: targetChunk.length,
+      category: "timeline",
+    };
+    setConversationArchives(characterId, [archiveEntry, ...archives].slice(0, 40));
+
+    const chunkIds = new Set(targetChunk.map((message) => message.id));
+    const remainder = messages.filter((message) => !chunkIds.has(message.id));
+    persistedState.conversations[characterId] = [buildArchivePlaceholder(cleanSummary), ...remainder];
+    saveChatState();
+    return archiveEntry;
+  } catch (error) {
+    console.warn("Conversation summarization failed:", error);
+    return null;
+  } finally {
+    automationLocks.delete(lockKey);
+  }
+}
+
+async function maybeRunMemoryMaintenance(characterId) {
+  const profile = getProfile(characterId);
+  if (!profile) {
+    return;
+  }
+
+  const extractionCount = Number(profile.memoryExtractionCount) || 0;
+  if (extractionCount > 0 && extractionCount % 5 === 0) {
+    await extractMemory(characterId);
+  }
+
+  await summarizeConversationChunk(characterId);
+}
+
 function clearConversationTimers() {
   appState.conversationTimers.forEach((timer) => window.clearTimeout(timer));
   appState.conversationTimers = [];
@@ -1051,7 +1371,10 @@ function appendMessage(conversationId, message) {
     return;
   }
   if (message.role === "user") {
-    updateProfile(conversationId, { lastUserMessageAt: message.createdAt || Date.now() });
+    updateProfile(conversationId, {
+      lastUserMessageAt: message.createdAt || Date.now(),
+      memoryExtractionCount: (Number(profile.memoryExtractionCount) || 0) + 1,
+    });
     return;
   }
   if (message.role === "ai") {
@@ -1243,9 +1566,13 @@ function closeCharacterEditor() {
 
 function buildOpenAIInput(conversationId) {
   const profile = getProfile(conversationId);
-  const memoryLimit = Math.max(1, Number(profile.memoryMessageCount) || 30);
+  const memoryLimit = Math.max(1, Math.min(20, Number(profile.memoryMessageCount) || 20));
   const allHistory = getConversation(conversationId).filter(
-    (message) => !message.typing && !message.failed && message.metaType !== "assistant-sticker",
+    (message) =>
+      !message.typing &&
+      !message.failed &&
+      message.metaType !== "assistant-sticker" &&
+      message.metaType !== "archive-placeholder",
   );
   const recentHistory = allHistory.slice(-memoryLimit);
   const prioritized = profile.intelligentMemoryManagement
@@ -1271,12 +1598,16 @@ function buildOpenAIInput(conversationId) {
   if (profile.aiNickname) {
     awareness.push(`The character refers to themself as "${profile.aiNickname}" when it feels natural.`);
   }
+  const memoryInjection = injectMemoryContext(conversationId);
   const characterPrompt = profile.characterPrompt || profile.worldbook || "";
   const promptSections = [FIXED_CHARACTER_SYSTEM_PROMPT];
   if (profile.useGlobalWordbook && persistedState.appSettings.globalWordbook?.trim()) {
     promptSections.push(persistedState.appSettings.globalWordbook.trim());
   }
   promptSections.push(characterPrompt);
+  if (memoryInjection) {
+    promptSections.push(memoryInjection);
+  }
   const systemText =
     `${promptSections.filter(Boolean).join("\n\n")}\n\n` +
     `${awareness.join(" ")}\n\n` +
@@ -1537,6 +1868,9 @@ async function sendMessage(conversationId, draft = appState.draftMessage, attach
     });
 
     appendMessage(conversationId, outgoingMessage);
+    window.setTimeout(() => {
+      maybeRunMemoryMaintenance(conversationId);
+    }, 0);
     targetMessageId = outgoingMessage.id;
     appState.draftMessage = "";
     appState.pendingAttachment = null;
@@ -2309,6 +2643,140 @@ function renderHomeScreen() {
           ${renderSearch()}
           ${renderHomeDock()}
         </section>
+      </div>
+    </div>
+  `;
+}
+
+function visibleCharacterProfiles() {
+  return Object.values(persistedState.characterProfiles).filter((profile) => profile.isVisible);
+}
+
+function memoryFilterProfiles() {
+  return visibleCharacterProfiles().filter(
+    (profile) => getMemories(profile.id).length || getConversationArchives(profile.id).length || getConversation(profile.id).length,
+  );
+}
+
+function renderMemoryScreen() {
+  const profiles = memoryFilterProfiles();
+  const selectedCharacterId =
+    appState.memoryCharacterFilter !== "all" && profiles.some((profile) => profile.id === appState.memoryCharacterFilter)
+      ? appState.memoryCharacterFilter
+      : "all";
+  const categoryFilter = appState.memoryCategoryFilter || "all";
+  const searchQuery = String(appState.memorySearchQuery || "").trim().toLowerCase();
+  const cards = profiles
+    .filter((profile) => selectedCharacterId === "all" || profile.id === selectedCharacterId)
+    .flatMap((profile) => {
+      const memoryCards = getMemories(profile.id).map((entry) => ({
+        id: entry.id,
+        characterId: profile.id,
+        profile,
+        kind: "memory",
+        text: entry.fact,
+        category: normalizeMemoryCategory(entry.category),
+        timestamp: entry.timestamp,
+      }));
+      const archiveCards = getConversationArchives(profile.id).map((entry) => ({
+        id: entry.id,
+        characterId: profile.id,
+        profile,
+        kind: "archive",
+        text: entry.summary,
+        category: "timeline",
+        timestamp: entry.timestamp,
+      }));
+      return [...memoryCards, ...archiveCards];
+    })
+    .filter((entry) => categoryFilter === "all" || entry.category === categoryFilter)
+    .filter((entry) => !searchQuery || `${entry.text} ${entry.profile.name}`.toLowerCase().includes(searchQuery))
+    .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+
+  const categoryButtons = [
+    { id: "all", label: "All" },
+    { id: "bio", label: "👤 Bio" },
+    { id: "likes", label: "❤️ Likes/Dislikes" },
+    { id: "timeline", label: "📅 Timeline" },
+    { id: "secrets", label: "🔑 Secrets" },
+  ];
+
+  return `
+    <div class="phone-shell phone-shell--messages">
+      <div class="shell-inner shell-inner--messages">
+        ${renderStatusBar()}
+        <div class="messages-app memory-app">
+          <div class="messages-pane memory-pane">
+            <div class="messages-header">
+              <button type="button" class="messages-back" data-action="go-home" aria-label="Back to home">
+                ${iconSvg("back")}
+              </button>
+              <div class="messages-header-title">Memory</div>
+              <div class="messages-header-spacer"></div>
+            </div>
+
+            <section class="memory-filter-rail">
+              <button type="button" class="memory-avatar-pill ${selectedCharacterId === "all" ? "is-active" : ""}" data-action="filter-memory-character" data-character-id="all">
+                <span class="memory-avatar-label">All</span>
+              </button>
+              ${profiles
+                .map(
+                  (profile) => `
+                    <button type="button" class="memory-avatar-pill ${selectedCharacterId === profile.id ? "is-active" : ""}" data-action="filter-memory-character" data-character-id="${profile.id}">
+                      <span class="memory-avatar-thumb">${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}</span>
+                      <span class="memory-avatar-label">${profile.name}</span>
+                    </button>
+                  `,
+                )
+                .join("")}
+            </section>
+
+            <section class="memory-search-shell">
+              <input type="search" class="memory-search-input" data-role="memory-search-input" value="${escapeAttribute(appState.memorySearchQuery)}" placeholder="Search memories" />
+            </section>
+
+            <section class="memory-category-row">
+              ${categoryButtons
+                .map(
+                  (item) => `
+                    <button type="button" class="memory-category-chip ${categoryFilter === item.id ? "is-active" : ""}" data-action="filter-memory-category" data-category="${item.id}">
+                      ${item.label}
+                    </button>
+                  `,
+                )
+                .join("")}
+            </section>
+
+            <section class="memory-cards-list">
+              ${
+                cards.length
+                  ? cards
+                      .map((entry) => {
+                        const meta = memoryCategoryMeta(entry.category);
+                        return `
+                          <article class="memory-card">
+                            <div class="memory-card-top">
+                              <span class="memory-type-tag ${meta.className}">${meta.emoji} ${meta.label}</span>
+                              <button type="button" class="memory-delete-button" data-action="${entry.kind === "archive" ? "delete-archive" : "delete-memory"}" data-character-id="${entry.characterId}" data-memory-id="${entry.id}" aria-label="Delete memory">
+                                ${iconSvg("delete")}
+                              </button>
+                            </div>
+                            <div class="memory-card-text">${entry.text}</div>
+                            <div class="memory-card-meta">${entry.profile.name} · ${formatMemoryTimestamp(entry.timestamp)}</div>
+                          </article>
+                        `;
+                      })
+                      .join("")
+                  : `
+                    <div class="messages-empty messages-empty-card">
+                      <div class="messages-empty-title">No memories yet</div>
+                      <p>Once chats deepen, this screen will hold extracted facts and compressed relationship summaries.</p>
+                    </div>
+                  `
+              }
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -3146,9 +3614,9 @@ function renderChatSettingsScreen(conversationId) {
               <label class="chat-settings-row">
                 <span class="chat-settings-row-copy">
                   <span class="chat-settings-row-title">Historical Messages Count</span>
-                  <span class="chat-settings-row-detail">Default: 30 rounds</span>
+                  <span class="chat-settings-row-detail">Short-term live context, capped at 20 recent messages.</span>
                 </span>
-                <input type="number" min="1" max="120" class="chat-settings-inline-input" data-role="memory-count-input" value="${profile.memoryMessageCount}" />
+                <input type="number" min="1" max="20" class="chat-settings-inline-input" data-role="memory-count-input" value="${Math.min(20, profile.memoryMessageCount)}" />
               </label>
               ${renderToggleField("Intelligent Memory Management", "memory-management-toggle", profile.intelligentMemoryManagement, "Keep important emotional and image moments more stable.")}
               <label class="chat-settings-stack-row">
@@ -3446,6 +3914,10 @@ function renderApp() {
     return renderMessagesScreen();
   }
 
+  if (appState.activeScreen === "memory") {
+    return renderMemoryScreen();
+  }
+
   if (appState.activeScreen === "central-settings") {
     return renderCentralSettingsScreen();
   }
@@ -3570,6 +4042,7 @@ function mountSettingsInputs(root) {
   const characterGlobalWordbookToggle = root.querySelector("[data-role='character-global-wordbook-toggle']");
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
   const stickerPackNameInput = root.querySelector("[data-role='sticker-pack-name-input']");
+  const memorySearchInput = root.querySelector("[data-role='memory-search-input']");
 
   if (activeApiProfileSelect) {
     activeApiProfileSelect.addEventListener("change", (event) => {
@@ -3656,7 +4129,7 @@ function mountSettingsInputs(root) {
 
   if (memoryCountInput) {
     memoryCountInput.addEventListener("input", (event) => {
-      const nextValue = Math.min(120, Math.max(1, Number(event.target.value) || 30));
+      const nextValue = Math.min(20, Math.max(1, Number(event.target.value) || 20));
       updateProfile(currentConversationId(), { memoryMessageCount: nextValue });
     });
   }
@@ -3807,6 +4280,13 @@ function mountSettingsInputs(root) {
         ...(appState.stickerPackDraft || createBlankStickerPack()),
         name: event.target.value,
       };
+    });
+  }
+
+  if (memorySearchInput) {
+    memorySearchInput.addEventListener("input", (event) => {
+      appState.memorySearchQuery = event.target.value;
+      render();
     });
   }
 
@@ -4074,6 +4554,40 @@ function handleAction(action, button) {
 
   if (action === "open-central-settings") {
     openCentralSettings();
+    render();
+    return;
+  }
+
+  if (action === "filter-memory-character") {
+    appState.memoryCharacterFilter = button.dataset.characterId || "all";
+    render();
+    return;
+  }
+
+  if (action === "filter-memory-category") {
+    appState.memoryCategoryFilter = button.dataset.category || "all";
+    render();
+    return;
+  }
+
+  if (action === "delete-memory") {
+    const characterId = button.dataset.characterId || "angel-bunny";
+    const memoryId = button.dataset.memoryId || "";
+    setMemories(
+      characterId,
+      getMemories(characterId).filter((entry) => entry.id !== memoryId),
+    );
+    render();
+    return;
+  }
+
+  if (action === "delete-archive") {
+    const characterId = button.dataset.characterId || "angel-bunny";
+    const archiveId = button.dataset.memoryId || "";
+    setConversationArchives(
+      characterId,
+      getConversationArchives(characterId).filter((entry) => entry.id !== archiveId),
+    );
     render();
     return;
   }
@@ -4434,6 +4948,15 @@ function wireInteractions(root) {
 
       if (appId === "settings") {
         openCentralSettings();
+        render();
+        return;
+      }
+
+      if (appId === "memory") {
+        appState.activeScreen = "memory";
+        appState.memoryCharacterFilter = "all";
+        appState.memoryCategoryFilter = "all";
+        appState.memorySearchQuery = "";
         render();
         return;
       }

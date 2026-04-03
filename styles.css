@@ -294,11 +294,19 @@ button {
   background: #f8f6f4;
 }
 
+.memory-app {
+  background: #f8f6f4;
+}
+
 .messages-pane {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 2px 0 106px;
+}
+
+.memory-pane {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
 }
 
 .central-settings-pane {
@@ -1053,6 +1061,168 @@ button {
   color: #8e8e93;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.memory-filter-rail,
+.memory-category-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.memory-avatar-pill,
+.memory-category-chip {
+  flex-shrink: 0;
+  border: 0;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--shell-text-soft);
+  box-shadow: 0 8px 22px rgba(79, 79, 79, 0.06);
+}
+
+.memory-avatar-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 50px;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.memory-avatar-pill.is-active,
+.memory-category-chip.is-active {
+  background: rgba(79, 79, 79, 0.1);
+  color: var(--shell-text);
+}
+
+.memory-avatar-thumb {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.08);
+}
+
+.memory-avatar-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.memory-search-shell {
+  margin-bottom: 14px;
+}
+
+.memory-search-input {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--shell-text);
+  padding: 0 16px;
+  box-shadow: 0 8px 22px rgba(79, 79, 79, 0.06);
+  font-family: "Varela Round", ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.memory-category-chip {
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.memory-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-card {
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
+  padding: 16px 18px;
+}
+
+.memory-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.memory-type-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.memory-type-tag.is-bio {
+  background: rgba(164, 201, 245, 0.28);
+  color: #54779f;
+}
+
+.memory-type-tag.is-likes {
+  background: rgba(240, 190, 212, 0.28);
+  color: #a16983;
+}
+
+.memory-type-tag.is-timeline {
+  background: rgba(212, 203, 192, 0.34);
+  color: #85786d;
+}
+
+.memory-type-tag.is-secrets {
+  background: rgba(214, 198, 225, 0.32);
+  color: #7d678f;
+}
+
+.memory-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.06);
+  color: var(--shell-text-faint);
+}
+
+.memory-delete-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.memory-card-text {
+  color: var(--shell-text);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+}
+
+.memory-card-meta {
+  margin-top: 10px;
+  color: var(--shell-text-faint);
+  font-size: 11px;
+  letter-spacing: -0.01em;
 }
 
 .central-settings-top-card,
