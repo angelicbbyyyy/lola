@@ -43,6 +43,7 @@ const homeConfig = {
   apps: [
     { id: "messages", label: "Messages", icon: "messages.JPG" },
     { id: "settings", label: "Settings", icon: "settings.JPG" },
+    { id: "memory", label: "Memory", icon: "memory.JPG" },
     { id: "music", label: "Music", icon: "music.JPG" },
     { id: "contacts", label: "Contacts", icon: "contacts.JPG" },
     { id: "twitter", label: "Twitter", icon: "twitter.JPG" },
