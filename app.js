@@ -78,6 +78,7 @@ const appState = {
   instagramGeneratingFeed: false,
   instagramGeneratingCommentsPostId: "",
   instagramGeneratingStrangers: false,
+  instagramStatusMessage: "",
 };
 
 const automationLocks = new Set();
@@ -1248,6 +1249,7 @@ function createDefaultInstagramPosts() {
     {
       id: "ig-seed-main",
       sourceType: "asset",
+      authorType: "me",
       assetRef: "Instagram Main.png",
       imageDataUrl: "",
       contextLabel: "A photo of a chaotic Tokyo city crossing with glowing billboards and tall buildings.",
@@ -1259,6 +1261,7 @@ function createDefaultInstagramPosts() {
     {
       id: "ig-seed-profile",
       sourceType: "asset",
+      authorType: "me",
       assetRef: "instagram friend profile.png",
       imageDataUrl: "",
       contextLabel: "A warm portrait-style photo with soft tones and a cozy hat.",
@@ -2614,7 +2617,7 @@ async function requestInstagramComments(post) {
   const friends = instagramFriendUsernames();
   const prompt = [
     `Generate 5 realistic Instagram comments about this post: "${post.contextLabel || post.caption || "Post"}".`,
-    "Return strict JSON as an array of objects with keys username and text.",
+    'Return strict JSON as an object like {"likes":"string","comments":[{"username":"string","text":"string"}]}.',
     `At least one username must come from this character list and stay in character: ${friends.map((entry) => `${entry.name} (@${entry.username}) - ${entry.prompt.slice(0, 90)}`).join("; ") || "none"}.`,
     "Use Gen Z slang, trendy gossipy tone, and emojis like 💀, 🤩, and 💅 when natural.",
     "Keep it safe and non-explicit.",
@@ -2633,7 +2636,13 @@ async function requestInstagramComments(post) {
   ]);
 
   const parsed = extractJsonValueCandidate(result);
-  return Array.isArray(parsed) ? parsed : [];
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.comments)) {
+    return parsed;
+  }
+  if (Array.isArray(parsed)) {
+    return { likes: "", comments: parsed };
+  }
+  return { likes: "", comments: [] };
 }
 
 async function requestInstagramStrangerRequests() {
@@ -5483,6 +5492,9 @@ function renderInstagramStories() {
 
 function renderInstagramFeedTab() {
   const items = getSimulatedFeedContent();
+  const ownPosts = [...getInstagramPosts()]
+    .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
+    .slice(0, 6);
   return `
     <div class="instagram-screen-body">
       <div class="instagram-topbar">
@@ -5494,8 +5506,44 @@ function renderInstagramFeedTab() {
           <button type="button" class="instagram-icon-button" data-action="instagram-open-dms">${instagramIconSvg("direct")}</button>
         </div>
       </div>
+      ${
+        appState.instagramStatusMessage
+          ? `<div class="instagram-status-banner">${escapeHtml(appState.instagramStatusMessage)}</div>`
+          : ""
+      }
       ${renderInstagramStories()}
       <div class="instagram-feed-list">
+        ${ownPosts
+          .map(
+            (post) => `
+              <article class="instagram-feed-card">
+                <div class="instagram-feed-head">
+                  <div class="instagram-feed-user">
+                    <div class="instagram-feed-avatar">${imageMarkup(getInstagramProfile().avatarDataUrl, getInstagramProfile().nickname, "h-full w-full", "IG")}</div>
+                    <div class="instagram-feed-identity">
+                      <div class="instagram-feed-username">${escapeHtml(getInstagramProfile().username)}</div>
+                      <div class="instagram-feed-location">${escapeHtml(post.contextLabel || "New post")}</div>
+                    </div>
+                  </div>
+                  <span class="instagram-feed-menu">${instagramIconSvg("menu")}</span>
+                </div>
+                <button type="button" class="instagram-feed-photo-button" data-action="instagram-open-post" data-post-id="${post.id}">
+                  <img class="instagram-feed-image" src="${escapeAttribute(assetPath(instagramPostImageSrc(post)))}" alt="${escapeAttribute(post.contextLabel || "Instagram post")}" />
+                </button>
+                <div class="instagram-feed-actions">
+                  <div class="instagram-feed-actions-left">
+                    <span>${instagramIconSvg("heart")}</span>
+                    <span>${instagramIconSvg("comment")}</span>
+                    <span>${instagramIconSvg("send")}</span>
+                  </div>
+                  <span>${instagramIconSvg("save")}</span>
+                </div>
+                <div class="instagram-feed-likes">${escapeHtml(formatInstagramCount(post.likes || 0))} likes</div>
+                <div class="instagram-feed-caption"><strong>${escapeHtml(getInstagramProfile().username)}</strong> ${escapeHtml(post.caption || post.contextLabel || "")}</div>
+              </article>
+            `,
+          )
+          .join("")}
         ${
           items.length
             ? items
@@ -5521,6 +5569,7 @@ function renderInstagramFeedTab() {
                         </div>
                         <span>${instagramIconSvg("save")}</span>
                       </div>
+                      <div class="instagram-feed-likes">${escapeHtml(formatInstagramCount(item.likes || `${Math.floor(Math.random() * 90 + 10)}k`))} likes</div>
                       <div class="instagram-feed-caption"><strong>${escapeHtml(item.user)}</strong> ${escapeHtml(item.caption || "")}</div>
                     </article>
                   `,
@@ -5650,8 +5699,19 @@ function renderInstagramPostView() {
             <span>Generate</span>
           </button>
         </div>
+        <div class="instagram-feed-likes instagram-feed-likes--detail">${escapeHtml(formatInstagramCount(post.likes || 0))} likes</div>
         <div class="instagram-detail-caption">${escapeHtml(post.caption || post.contextLabel || "")}</div>
+        ${
+          post.authorType === "me"
+            ? `<button type="button" class="instagram-delete-post" data-action="instagram-delete-post" data-post-id="${post.id}">Delete Post</button>`
+            : ""
+        }
         <div class="instagram-comments-list">
+          ${
+            appState.instagramGeneratingCommentsPostId === post.id
+              ? `<div class="instagram-comments-empty">Generating comments and likes...</div>`
+              : ""
+          }
           ${
             Array.isArray(post.comments) && post.comments.length
               ? post.comments
@@ -5872,14 +5932,30 @@ function updateInstagramPost(postId, updater) {
   saveInstagramPosts(posts);
 }
 
+function deleteInstagramPost(postId) {
+  const posts = getInstagramPosts().filter((post) => post.id !== postId);
+  saveInstagramPosts(posts);
+  if (appState.instagramSelectedPostId === postId) {
+    appState.instagramSelectedPostId = "";
+    appState.instagramView = "main";
+  }
+}
+
 async function generateInstagramFeed() {
   if (!canUseActiveApiProfile()) {
+    appState.instagramStatusMessage = "Add a working AI profile in Settings first.";
+    render();
     return;
   }
   appState.instagramGeneratingFeed = true;
+  appState.instagramStatusMessage = "Generating feed...";
   render();
   try {
     const generated = await requestInstagramFeedPosts();
+    if (!generated.length) {
+      appState.instagramStatusMessage = "The feed generator returned nothing. Try again.";
+      return;
+    }
     saveSimulatedFeedContent(
       generated.slice(0, 5).map((item, index) => ({
         user: String(item.user || `friend_${index + 1}`).trim(),
@@ -5887,8 +5963,9 @@ async function generateInstagramFeed() {
         caption: String(item.caption || "").trim(),
       })),
     );
-  } catch (_error) {
-    // Silent fail for now; the user can retry generation.
+    appState.instagramStatusMessage = "Feed generated.";
+  } catch (error) {
+    appState.instagramStatusMessage = summarizeApiError(error) || "Unable to generate the feed.";
   } finally {
     appState.instagramGeneratingFeed = false;
     render();
@@ -5898,17 +5975,21 @@ async function generateInstagramFeed() {
 async function generateInstagramComments(postId) {
   const post = getInstagramPost(postId);
   if (!post || !canUseActiveApiProfile()) {
+    appState.instagramStatusMessage = "Add a working AI profile in Settings first.";
+    render();
     return;
   }
 
   appState.instagramGeneratingCommentsPostId = postId;
+  appState.instagramStatusMessage = "Generating comments...";
   render();
   try {
     const generated = await requestInstagramComments(post);
     const characters = instagramFriendUsernames();
     updateInstagramPost(postId, (entry) => ({
       ...entry,
-      comments: generated.slice(0, 5).map((comment, index) => {
+      likes: generated.likes || entry.likes || 0,
+      comments: (generated.comments || []).slice(0, 5).map((comment, index) => {
         const username = String(comment.username || `user_${index + 1}`).trim();
         const matchedCharacter = characters.find(
           (character) =>
@@ -5923,8 +6004,9 @@ async function generateInstagramComments(postId) {
         };
       }),
     }));
-  } catch (_error) {
-    // Silent fail for now.
+    appState.instagramStatusMessage = "Comments generated.";
+  } catch (error) {
+    appState.instagramStatusMessage = summarizeApiError(error) || "Unable to generate comments.";
   } finally {
     appState.instagramGeneratingCommentsPostId = "";
     render();
@@ -5933,13 +6015,20 @@ async function generateInstagramComments(postId) {
 
 async function generateInstagramStrangers() {
   if (!canUseActiveApiProfile()) {
+    appState.instagramStatusMessage = "Add a working AI profile in Settings first.";
+    render();
     return;
   }
 
   appState.instagramGeneratingStrangers = true;
+  appState.instagramStatusMessage = "Generating stranger requests...";
   render();
   try {
     const generated = await requestInstagramStrangerRequests();
+    if (!generated.length) {
+      appState.instagramStatusMessage = "No stranger requests came back. Try again.";
+      return;
+    }
     saveInstagramDmDb({
       ...getInstagramDmDb(),
       strangers: generated.slice(0, 10).map((entry, index) => ({
@@ -5960,8 +6049,9 @@ async function generateInstagramStrangers() {
         ],
       })),
     });
-  } catch (_error) {
-    // Silent fail for now.
+    appState.instagramStatusMessage = "Stranger requests generated.";
+  } catch (error) {
+    appState.instagramStatusMessage = summarizeApiError(error) || "Unable to generate stranger requests.";
   } finally {
     appState.instagramGeneratingStrangers = false;
     render();
@@ -6738,16 +6828,19 @@ function mountFileInputs(root) {
         nextPosts.unshift({
           id: nextInstagramPostId(),
           sourceType: "upload",
+          authorType: "me",
           assetRef: "",
           imageDataUrl: dataUrl,
           contextLabel: file.name.replace(/\.[^.]+$/, "") || "Uploaded photo",
-          caption: "",
+          caption: `new drop ${file.name.replace(/\.[^.]+$/, "").toLowerCase()}`,
           comments: [],
           likes: 0,
           createdAt: Date.now() + nextPosts.length,
         });
       }
       saveInstagramPosts(nextPosts);
+      event.target.value = "";
+      appState.instagramStatusMessage = "Post uploaded.";
       render();
     });
   }
@@ -6762,6 +6855,8 @@ function mountFileInputs(root) {
       saveInstagramProfile({
         avatarDataUrl: dataUrl,
       });
+      event.target.value = "";
+      appState.instagramStatusMessage = "Profile photo updated.";
       render();
     });
   }
@@ -6930,6 +7025,7 @@ function handleAction(action, button) {
     appState.instagramView = "main";
     appState.instagramSelectedPostId = "";
     appState.instagramEditProfileOpen = false;
+    appState.instagramStatusMessage = "";
     render();
     return;
   }
@@ -6993,6 +7089,7 @@ function handleAction(action, button) {
   if (action === "instagram-open-dms") {
     appState.instagramView = "dm-inbox";
     appState.instagramSearchQuery = "";
+    appState.instagramStatusMessage = "";
     render();
     return;
   }
@@ -7035,6 +7132,21 @@ function handleAction(action, button) {
 
   if (action === "instagram-generate-strangers") {
     generateInstagramStrangers();
+    return;
+  }
+
+  if (action === "instagram-delete-post") {
+    const postId = button.dataset.postId || "";
+    if (!postId) {
+      return;
+    }
+    const confirmed = window.confirm("Delete this Instagram post?");
+    if (!confirmed) {
+      return;
+    }
+    deleteInstagramPost(postId);
+    appState.instagramStatusMessage = "Post deleted.";
+    render();
     return;
   }
 
