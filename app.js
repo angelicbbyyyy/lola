@@ -9,6 +9,9 @@ const STORAGE_COLLECTION_KEYS = {
   memories: "lola_chat_engine_v1_memories",
   conversationArchives: "lola_chat_engine_v1_archives",
 };
+const DB_NAME = "lola_chat_engine_db";
+const DB_VERSION = 1;
+const DB_STORE = "state";
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
@@ -229,6 +232,7 @@ let statusClockTimeout = null;
 let statusClockInterval = null;
 let simulationLoopId = null;
 let messageSequence = 6;
+let dbWritePromise = Promise.resolve();
 
 function syncMessageSequence() {
   const maxConversationId = Object.values(persistedState?.conversations || {})
@@ -374,6 +378,75 @@ function readSnapshotIndex() {
 
 function writeSnapshotIndex(keys) {
   window.localStorage.setItem(STORAGE_SNAPSHOT_INDEX_KEY, JSON.stringify(keys));
+}
+
+function openStateDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      resolve(null);
+      return;
+    }
+
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DB_STORE)) {
+        database.createObjectStore(DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function readDbState() {
+  try {
+    const database = await openStateDatabase();
+    if (!database) {
+      return null;
+    }
+
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(DB_STORE, "readonly");
+      const store = transaction.objectStore(DB_STORE);
+      const request = store.get("persistedState");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        database.close();
+        resolve(request.result || null);
+      };
+    });
+  } catch (error) {
+    console.warn("Unable to read IndexedDB state:", error);
+    return null;
+  }
+}
+
+function queueDbWrite(state) {
+  dbWritePromise = dbWritePromise
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const database = await openStateDatabase();
+        if (!database) {
+          return;
+        }
+
+        await new Promise((resolve, reject) => {
+          const transaction = database.transaction(DB_STORE, "readwrite");
+          const store = transaction.objectStore(DB_STORE);
+          const request = store.put(state, "persistedState");
+          request.onerror = () => reject(request.error);
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = () => reject(transaction.error);
+        });
+      } catch (error) {
+        console.warn("Unable to write IndexedDB state:", error);
+      }
+    });
 }
 
 function readCollectionMirror(key) {
@@ -595,7 +668,7 @@ function mergeStateWithCollectionMirrors(state, mirrors) {
   return nextState;
 }
 
-function loadChatState() {
+function loadChatStateFromLocalStorage() {
   const defaults = createDefaultPersistedState();
 
   try {
@@ -634,6 +707,27 @@ function loadChatState() {
     console.warn("Unable to load saved chat state:", error);
     return defaults;
   }
+}
+
+async function loadChatState() {
+  const defaults = createDefaultPersistedState();
+  const localState = loadChatStateFromLocalStorage();
+  const dbState = await readDbState();
+
+  if (!dbState) {
+    return localState || defaults;
+  }
+
+  const merged = mergeTwoRawSnapshots(dbState, localState || defaults);
+  const normalized = mergeStateWithCollectionMirrors(normalizePersistedSnapshot(defaults, merged), {});
+
+  try {
+    writeStoragePayload(JSON.stringify(normalized));
+  } catch (_error) {
+    // Best-effort sync back to localStorage.
+  }
+
+  return normalized;
 }
 
 function getApiProfiles() {
@@ -700,6 +794,7 @@ function writeStoragePayload(json) {
 function saveChatState() {
   try {
     persistedState.updatedAt = Date.now();
+    queueDbWrite(typeof structuredClone === "function" ? structuredClone(persistedState) : JSON.parse(JSON.stringify(persistedState)));
     writeStoragePayload(JSON.stringify(persistedState));
     appState.storageWarningMessage = "";
   } catch (error) {
@@ -5503,8 +5598,8 @@ function render() {
   scrollChatToBottom(rootNode);
 }
 
-function init() {
-  persistedState = loadChatState();
+async function init() {
+  persistedState = await loadChatState();
   const savedConversationId = persistedState.appSettings?.lastActiveConversationId;
   const availableCharacterIds = Object.keys(persistedState.characterProfiles || {});
   const restoredConversationId = availableCharacterIds.includes(savedConversationId)
