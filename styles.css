@@ -359,7 +359,6 @@ button {
 
 .messages-list-card,
 .contacts-utility,
-.contact-card,
 .settings-group,
 .messages-empty-card {
   overflow: hidden;
@@ -373,9 +372,9 @@ button {
   display: grid;
   grid-template-columns: 50px 1fr auto;
   gap: 12px;
-  min-height: 72px;
+  min-height: 58px;
   align-items: center;
-  padding: 11px 16px;
+  padding: 10px 16px;
 }
 
 .chat-row-button {
@@ -412,13 +411,11 @@ button {
 }
 
 .chat-name {
-  margin-bottom: 4px;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.25;
 }
 
-.chat-preview,
 .contact-card-copy p {
   overflow: hidden;
   color: #8e8e93;
@@ -536,11 +533,26 @@ button {
 }
 
 .contact-card {
+  position: relative;
   display: grid;
   grid-template-columns: 50px 1fr auto;
   gap: 12px;
   align-items: center;
-  padding: 14px 16px;
+  padding: 10px 16px;
+  min-height: 58px;
+}
+
+.contact-card::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 70px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.05);
+}
+
+.contact-card:last-child::after {
+  display: none;
 }
 
 .contact-card--interactive {

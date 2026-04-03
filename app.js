@@ -1768,7 +1768,6 @@ function renderChatsTab() {
         </div>
         <div class="chat-copy">
           <div class="chat-name">${profile.name}</div>
-          <div class="chat-preview">${messagePreview(lastMessage) || "Start the conversation..."}</div>
         </div>
         <div class="chat-meta">
           <div class="chat-time">${lastMessage?.timestamp || profile.subtitle}</div>
@@ -1832,42 +1831,43 @@ function renderContactsTab() {
         <span class="contacts-add-icon">+</span>
         <span>Create Character</span>
       </button>
-      ${
-        visibleProfiles.length
-          ? visibleProfiles
-              .map(
-                (profile) => `
-                  <section class="contact-card contact-card--interactive" data-action="open-character-editor" data-profile-id="${profile.id}">
-                    <div class="contact-card-avatar">
-                      ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
-                    </div>
-                    <div class="contact-card-copy">
-                      <div class="contact-card-title-row">
-                        <h3>${profile.name}</h3>
-                        <span class="contact-tag">${profile.messageFrequency.toUpperCase()}</span>
-                        ${profile.isBlocked ? '<span class="contact-tag">Blocked</span>' : '<span class="contact-tag">AI</span>'}
+      <section class="messages-list-card">
+        ${
+          visibleProfiles.length
+            ? visibleProfiles
+                .map(
+                  (profile) => `
+                    <div class="contact-card contact-card--interactive" data-action="open-character-editor" data-profile-id="${profile.id}">
+                      <div class="contact-card-avatar">
+                        ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
                       </div>
-                      <p>${(profile.characterPrompt || profile.worldbook || "").slice(0, 74)}...</p>
+                      <div class="contact-card-copy">
+                        <div class="contact-card-title-row">
+                          <h3>${profile.name}</h3>
+                          <span class="contact-tag">${profile.messageFrequency.toUpperCase()}</span>
+                          ${profile.isBlocked ? '<span class="contact-tag">Blocked</span>' : '<span class="contact-tag">AI</span>'}
+                        </div>
+                      </div>
+                      <div class="contact-card-actions">
+                        <button type="button" class="contact-icon-button" data-action="open-chat" data-conversation="${profile.id}" aria-label="Open chat">
+                          ${iconSvg("pencil")}
+                        </button>
+                        <button type="button" class="contact-icon-button" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete sample contact">
+                          ${iconSvg("delete")}
+                        </button>
+                      </div>
                     </div>
-                    <div class="contact-card-actions">
-                      <button type="button" class="contact-icon-button" data-action="open-chat" data-conversation="${profile.id}" aria-label="Open chat">
-                        ${iconSvg("pencil")}
-                      </button>
-                      <button type="button" class="contact-icon-button" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete sample contact">
-                        ${iconSvg("delete")}
-                      </button>
-                    </div>
-                  </section>
-                `,
-              )
-              .join("")
-          : `
-            <div class="messages-empty messages-empty-card">
-              <div class="messages-empty-title">Sample contact removed</div>
-              <p>Refresh local storage or recreate the character later.</p>
-            </div>
-          `
-      }
+                  `,
+                )
+                .join("")
+            : `
+              <div class="messages-empty">
+                <div class="messages-empty-title">No contacts yet</div>
+                <p>Create a character to get started.</p>
+              </div>
+            `
+        }
+      </section>
     </div>
   `;
 }
