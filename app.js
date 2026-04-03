@@ -953,21 +953,31 @@ function buildOpenAIInput(conversationId) {
 function buildAutomationInput(conversationId, mode) {
   const input = buildOpenAIInput(conversationId);
   const profile = getProfile(conversationId);
+  const latestMessage = latestVisibleMessage(conversationId);
+  const latestSummary = messagePreview(latestMessage);
   const baseInstruction =
     mode === "moment"
       ? [
-          "Create a very short in-character Moments post.",
-          "It should read like something this character would post on a social feed, not a reply to the user.",
-          "Keep it to 1 or 2 short lines, intimate and human.",
-          "Do not use hashtags, stage directions, or formal writing.",
+          "Create a very short in-character WeChat Moments post.",
+          "Write it like this character is posting to their own Moments feed naturally after living their day, not directly replying in chat.",
+          "It should feel realistic for a private little social post: a passing mood, vague feeling, tiny update, or soft indirect thought.",
+          "Do not address the user directly unless it feels subtle and realistic.",
+          "Do not write it like a letter, scene, narration, roleplay, or assistant answer.",
+          "Keep it to 1 or 2 short lines, casual, human, and post-like.",
+          "No hashtags, no quotation marks around the whole post, no stage directions, no formal writing.",
+          latestSummary ? `Recent chat mood for context only: ${latestSummary}.` : "",
           profile.timeAwareness ? `Use the current time context naturally: ${currentTimeContext()}.` : "",
         ]
       : [
           "Send one proactive in-character message to the user.",
           "This is not a reply. You are reaching out first because time passed and you noticed their silence.",
+          "This should feel like a realistic check-in, not a random interruption.",
+          "Only send something you would genuinely text after waiting and noticing the gap.",
           formatElapsedContext(profile.lastUserMessageAt),
+          latestSummary ? `Last visible chat context: ${latestSummary}.` : "",
           profile.timeAwareness ? `Use the local time naturally: ${currentTimeContext()}.` : "",
-          "Keep it to 1 or 2 short text-message lines.",
+          "Keep it to 1 or 2 short text-message lines, gentle and natural.",
+          "Do not suddenly change topics or send something loud, dramatic, or repetitive.",
           "Do not explain that you are an AI or mention prompts.",
         ];
 
@@ -1003,6 +1013,37 @@ async function requestGeneratedProactiveMessage(conversationId) {
 async function requestGeneratedMomentPost(conversationId) {
   const activeApiProfile = getActiveApiProfile();
   return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "moment"));
+}
+
+function shouldAllowProactiveReachout(profile, now) {
+  const proactiveIntervalMs = normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES) * 60 * 1000;
+  const lastUserAt = Number(profile.lastUserMessageAt) || 0;
+  const lastCharacterAt = Number(profile.lastCharacterMessageAt) || 0;
+  const latestMessage = latestVisibleMessage(profile.id);
+
+  if (!profile.proactiveMessaging || !canUseActiveApiProfile()) {
+    return false;
+  }
+
+  if (!lastUserAt) {
+    return false;
+  }
+
+  if (latestMessage?.role === "ai") {
+    return false;
+  }
+
+  if (lastCharacterAt && lastCharacterAt > lastUserAt) {
+    return false;
+  }
+
+  return now - lastUserAt >= proactiveIntervalMs;
+}
+
+function shouldAllowMomentsPost(profile, now) {
+  const momentsIntervalMs = normalizeIntervalMinutes(profile.momentsIntervalMinutes, DEFAULT_MOMENTS_INTERVAL_MINUTES) * 60 * 1000;
+  const lastMomentAt = Number(profile.lastMomentPostAt) || 0;
+  return !!(profile.momentsPosting && canUseActiveApiProfile() && now - (lastMomentAt || now) >= momentsIntervalMs);
 }
 
 function receiveMessage(conversationId, responseText) {
@@ -1695,20 +1736,8 @@ async function maybeSimulateCharacterActivity() {
       continue;
     }
 
-    const proactiveIntervalMs = normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES) * 60 * 1000;
-    const momentsIntervalMs = normalizeIntervalMinutes(profile.momentsIntervalMinutes, DEFAULT_MOMENTS_INTERVAL_MINUTES) * 60 * 1000;
-    const lastUserAt = Number(profile.lastUserMessageAt) || 0;
-    const lastCharacterAt = Number(profile.lastCharacterMessageAt) || 0;
-    const lastMomentAt = Number(profile.lastMomentPostAt) || 0;
-    const lastConversationActivityAt = Math.max(lastUserAt, lastCharacterAt) || now;
-    const shouldPing =
-      profile.proactiveMessaging &&
-      canUseActiveApiProfile() &&
-      now - lastConversationActivityAt >= proactiveIntervalMs;
-    const shouldPostMoment =
-      profile.momentsPosting &&
-      canUseActiveApiProfile() &&
-      now - (lastMomentAt || now) >= momentsIntervalMs;
+    const shouldPing = shouldAllowProactiveReachout(profile, now);
+    const shouldPostMoment = shouldAllowMomentsPost(profile, now);
 
     if (shouldPing && !automationLocks.has(`proactive:${profile.id}`)) {
       automationLocks.add(`proactive:${profile.id}`);
