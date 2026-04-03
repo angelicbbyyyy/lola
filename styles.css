@@ -1653,6 +1653,167 @@ button {
   height: 18px;
 }
 
+.sticker-picker {
+  height: 250px;
+  margin-bottom: 8px;
+  border: 0.5px solid rgba(79, 79, 79, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  overflow: hidden;
+}
+
+.sticker-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  height: 190px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.sticker-picker-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.sticker-picker-item img,
+.sticker-pack-tab img,
+.sticker-store-thumb img,
+.sticker-pack-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sticker-picker-packs {
+  display: flex;
+  gap: 10px;
+  height: 60px;
+  padding: 8px 14px 12px;
+  overflow-x: auto;
+  border-top: 0.5px solid rgba(79, 79, 79, 0.06);
+}
+
+.sticker-pack-tab {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--shell-text-soft);
+}
+
+.sticker-pack-tab.is-active {
+  outline: 1px solid rgba(79, 79, 79, 0.12);
+}
+
+.sticker-message-shell {
+  max-width: 120px;
+}
+
+.sticker-message-image {
+  display: block;
+  max-width: 120px;
+  max-height: 120px;
+  object-fit: contain;
+}
+
+.sticker-store-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sticker-store-card,
+.sticker-pack-card,
+.sticker-store-item {
+  border: 0.5px solid rgba(79, 79, 79, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
+}
+
+.sticker-store-card {
+  padding: 16px;
+}
+
+.sticker-store-upload {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 18px;
+  background: rgba(79, 79, 79, 0.08);
+  color: var(--shell-text);
+  font-family: "Varela Round", ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+}
+
+.sticker-store-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sticker-pack-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  text-align: left;
+}
+
+.sticker-pack-preview,
+.sticker-store-thumb {
+  width: 68px;
+  height: 68px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 22%;
+  background: rgba(79, 79, 79, 0.06);
+}
+
+.sticker-pack-copy h3 {
+  margin: 0 0 4px;
+  color: var(--shell-text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sticker-pack-copy p {
+  margin: 0;
+  color: var(--shell-text-soft);
+  font-size: 13px;
+}
+
+.sticker-store-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+}
+
+.sticker-store-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sticker-store-textarea {
+  min-height: 88px;
+}
+
 .composer-block-note {
   margin-top: 6px;
   color: var(--shell-text-soft);

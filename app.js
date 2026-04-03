@@ -38,6 +38,11 @@ const appState = {
     message: "",
   },
   showApiKey: false,
+  stickerStoreView: "packs",
+  editingStickerPackId: null,
+  stickerPackDraft: null,
+  activeStickerPackId: null,
+  stickerPickerOpen: false,
 };
 
 const automationLocks = new Set();
@@ -256,6 +261,8 @@ function createDefaultPersistedState() {
         momentsPosting: true,
         momentsFrequency: "low",
         momentsIntervalMinutes: DEFAULT_MOMENTS_INTERVAL_MINUTES,
+        allowAiStickers: false,
+        aiStickerFrequency: "low",
         isBlocked: false,
         chatWallpaper: "",
         nicknameForUser: "",
@@ -285,6 +292,7 @@ function createDefaultPersistedState() {
       },
     ],
     favoritesLibrary: {},
+    stickerPacks: [],
   };
 }
 
@@ -307,6 +315,8 @@ function normalizeProfile(profile, defaults) {
     lastUserMessageAt: Number(profile?.lastUserMessageAt) || defaults.lastUserMessageAt || 0,
     lastCharacterMessageAt: Number(profile?.lastCharacterMessageAt) || defaults.lastCharacterMessageAt || 0,
     lastMomentPostAt: Number(profile?.lastMomentPostAt) || defaults.lastMomentPostAt || 0,
+    allowAiStickers: typeof profile?.allowAiStickers === "boolean" ? profile.allowAiStickers : defaults.allowAiStickers || false,
+    aiStickerFrequency: profile?.aiStickerFrequency === "high" ? "high" : defaults.aiStickerFrequency || "low",
     ...profile,
   };
 }
@@ -346,6 +356,7 @@ function loadChatState() {
       },
       momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
       favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
+      stickerPacks: Array.isArray(parsed.stickerPacks) ? parsed.stickerPacks : defaults.stickerPacks,
     };
   } catch (error) {
     console.warn("Unable to load saved chat state:", error);
@@ -471,6 +482,14 @@ function createFallback(label, className = "") {
   return `<div class="app-fallback ${className}">${label}</div>`;
 }
 
+function nextStickerPackId() {
+  return `pack-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function nextStickerId() {
+  return `sticker-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
 function imageMarkup(fileName, alt, extraClass = "", fallbackLabel = "IMG") {
   if (!fileName) {
     return createFallback(fallbackLabel, extraClass);
@@ -489,6 +508,192 @@ function imageMarkup(fileName, alt, extraClass = "", fallbackLabel = "IMG") {
 
 function escapeAttribute(value) {
   return String(value || "").replace(/"/g, "&quot;");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getStickerPacks() {
+  return Array.isArray(persistedState.stickerPacks) ? persistedState.stickerPacks : [];
+}
+
+function getStickerPack(packId) {
+  return getStickerPacks().find((pack) => pack.id === packId) || null;
+}
+
+function saveStickerPacks(nextPacks) {
+  persistedState.stickerPacks = nextPacks;
+  saveChatState();
+}
+
+function createBlankStickerPack() {
+  return {
+    id: nextStickerPackId(),
+    name: "New Pack",
+    stickers: [],
+  };
+}
+
+function openStickerStore(packId = "") {
+  appState.activeScreen = "messages";
+  appState.activeMessagesTab = "settings";
+  appState.messagesView = "sticker-store";
+  appState.stickerStoreView = packId ? "editor" : "packs";
+  appState.editingStickerPackId = packId || null;
+  appState.stickerPackDraft = packId ? JSON.parse(JSON.stringify(getStickerPack(packId))) : null;
+}
+
+function closeStickerStore() {
+  appState.messagesView = "list";
+  appState.stickerStoreView = "packs";
+  appState.editingStickerPackId = null;
+  appState.stickerPackDraft = null;
+  appState.activeMessagesTab = "settings";
+}
+
+function openStickerPackEditor(packId = "") {
+  const draft = packId ? JSON.parse(JSON.stringify(getStickerPack(packId))) : createBlankStickerPack();
+  appState.messagesView = "sticker-store";
+  appState.stickerStoreView = "editor";
+  appState.editingStickerPackId = draft.id;
+  appState.stickerPackDraft = draft;
+}
+
+function closeStickerPackEditor() {
+  appState.stickerStoreView = "packs";
+  appState.editingStickerPackId = null;
+  appState.stickerPackDraft = null;
+}
+
+function stickerPackPreview(pack) {
+  return pack?.stickers?.[0]?.imageDataUrl || "";
+}
+
+function persistStickerPackDraft() {
+  const draft = appState.stickerPackDraft;
+  if (!draft) {
+    return;
+  }
+
+  const normalizedPack = {
+    ...draft,
+    name: (draft.name || "Untitled Pack").trim() || "Untitled Pack",
+    stickers: Array.isArray(draft.stickers) ? draft.stickers : [],
+  };
+
+  const existingPacks = getStickerPacks();
+  const nextPacks = existingPacks.some((pack) => pack.id === normalizedPack.id)
+    ? existingPacks.map((pack) => (pack.id === normalizedPack.id ? normalizedPack : pack))
+    : [normalizedPack, ...existingPacks];
+
+  saveStickerPacks(nextPacks);
+  appState.activeStickerPackId = normalizedPack.id;
+  closeStickerPackEditor();
+}
+
+function findStickerById(stickerId) {
+  for (const pack of getStickerPacks()) {
+    const sticker = (pack.stickers || []).find((entry) => entry.id === stickerId);
+    if (sticker) {
+      return { pack, sticker };
+    }
+  }
+  return null;
+}
+
+function chooseStickerForAiReply(replyText, profile) {
+  if (!profile.allowAiStickers) {
+    return null;
+  }
+
+  const allStickers = getStickerPacks().flatMap((pack) =>
+    (pack.stickers || []).map((sticker) => ({
+      ...sticker,
+      packId: pack.id,
+    })),
+  );
+  if (!allStickers.length) {
+    return null;
+  }
+
+  const loweredReply = String(replyText || "").toLowerCase();
+  const matching = allStickers.filter((sticker) => {
+    const descriptionWords = `${sticker.name} ${sticker.description}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    return descriptionWords.some((word) => word.length > 2 && loweredReply.includes(word));
+  });
+
+  if (!matching.length) {
+    return null;
+  }
+
+  const conversation = getConversation(currentConversationId()).filter((message) => !message.typing);
+  const recentAiStickerMessages = conversation.slice(-4).filter((message) => message.role === "ai" && message.stickerId);
+  if (recentAiStickerMessages.length >= 2) {
+    return null;
+  }
+
+  const chance = profile.aiStickerFrequency === "high" ? 0.42 : 0.18;
+  if (Math.random() > chance) {
+    return null;
+  }
+
+  return matching[Math.floor(Math.random() * matching.length)] || null;
+}
+
+function appendAiStickerForReply(conversationId, replyText) {
+  const profile = getProfile(conversationId);
+  const sticker = chooseStickerForAiReply(replyText, profile);
+  if (!sticker) {
+    return;
+  }
+
+  appendMessage(
+    conversationId,
+    createMessage({
+      role: "ai",
+      text: "",
+      timestamp: formatLocalTime(),
+      status: "delivered",
+      metaType: "assistant-sticker",
+      stickerId: sticker.id,
+      stickerPackId: sticker.packId,
+      stickerImageDataUrl: sticker.imageDataUrl,
+      stickerName: sticker.name,
+      stickerDescription: sticker.description,
+    }),
+  );
+}
+
+function sendStickerMessage(conversationId, sticker) {
+  appendMessage(
+    conversationId,
+    createMessage({
+      role: "user",
+      text: "",
+      timestamp: formatLocalTime(),
+      status: "sent",
+      attempts: 1,
+      requestPayload: {
+        text: "",
+        imageDataUrl: "",
+        stickerId: sticker.id,
+        stickerName: sticker.name,
+        stickerDescription: sticker.description,
+      },
+      metaType: "user-sticker",
+      stickerId: sticker.id,
+      stickerPackId: sticker.packId,
+      stickerImageDataUrl: sticker.imageDataUrl,
+      stickerName: sticker.name,
+      stickerDescription: sticker.description,
+    }),
+  );
+  appState.stickerPickerOpen = false;
 }
 
 function formatLocalTime() {
@@ -642,6 +847,11 @@ function createMessage({
   quotedMessageId = "",
   quotedMessageText = "",
   deleting = false,
+  stickerId = "",
+  stickerImageDataUrl = "",
+  stickerName = "",
+  stickerDescription = "",
+  stickerPackId = "",
 }) {
   return {
     id: nextMessageId(),
@@ -662,6 +872,11 @@ function createMessage({
     quotedMessageId,
     quotedMessageText,
     deleting,
+    stickerId,
+    stickerImageDataUrl,
+    stickerName,
+    stickerDescription,
+    stickerPackId,
   };
 }
 
@@ -1103,6 +1318,9 @@ function buildMessageTextForModel(message) {
   if (message.quotedMessageText) {
     parts.push(`Quoted earlier message for context: "${message.quotedMessageText}"`);
   }
+  if (message.stickerName || message.stickerDescription) {
+    parts.push(`Sticker sent: ${message.stickerName || "Unnamed sticker"}. Mood/description: ${message.stickerDescription || "No description provided"}.`);
+  }
   if (message.text) {
     parts.push(message.text);
   }
@@ -1243,6 +1461,7 @@ function receiveMessage(conversationId, responseText) {
       metaType: "assistant",
     }),
   );
+  appendAiStickerForReply(conversationId, responseText);
 }
 
 async function requestAIResponse(conversationId, messageId) {
@@ -2345,7 +2564,7 @@ function renderSettingsTab() {
               ${group
                 .map(
                   (item) => `
-                    <button type="button" class="settings-row">
+                    <button type="button" class="settings-row" ${item === "Emoji Store" ? 'data-action="open-sticker-store"' : ""}>
                       <span>${item}</span>
                       <span class="contacts-chevron">></span>
                     </button>
@@ -2536,6 +2755,18 @@ function renderTypingBubble(profile) {
   `;
 }
 
+function renderStickerImageMessage(message) {
+  if (!message.stickerImageDataUrl) {
+    return "";
+  }
+
+  return `
+    <div class="sticker-message-shell">
+      <img src="${escapeAttribute(message.stickerImageDataUrl)}" alt="${escapeAttribute(message.stickerName || "Sticker")}" class="sticker-message-image" />
+    </div>
+  `;
+}
+
 function renderMessage(conversationId, message) {
   const profile = getProfile(conversationId);
   if (message.typing) {
@@ -2545,6 +2776,7 @@ function renderMessage(conversationId, message) {
   const isUser = message.role === "user";
   const isFavorited = message.isFavorited || isMessageFavorited(conversationId, message.id);
   const metaText = message.failed ? "Failed" : message.status === "read" ? "Read" : "Sent";
+  const hasStickerOnly = !!message.stickerImageDataUrl && !message.text && !message.imageDataUrl;
   const errorDetail = message.failed && message.errorMessage
     ? `<div class="message-error-detail">${message.errorMessage}</div>`
     : "";
@@ -2593,11 +2825,17 @@ function renderMessage(conversationId, message) {
                 ${retryButton}
               </div>
               ${errorDetail}
-              <div class="message-bubble message-bubble--user">
-                ${quotedBlock}
-                ${imageBlock}
-                ${message.text ? `<p>${message.text}</p>` : ""}
-              </div>
+              ${
+                hasStickerOnly
+                  ? renderStickerImageMessage(message)
+                  : `
+                    <div class="message-bubble message-bubble--user">
+                      ${quotedBlock}
+                      ${imageBlock}
+                      ${message.text ? `<p>${message.text}</p>` : ""}
+                    </div>
+                  `
+              }
             </div>
             <div class="message-avatar">
               ${imageMarkup(profile.avatar, "User avatar placeholder", "h-full w-full", "ME")}
@@ -2608,14 +2846,20 @@ function renderMessage(conversationId, message) {
               ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
             </div>
             <div class="message-stack">
-              <div class="message-bubble-shell">
-                <div class="message-bubble message-bubble--ai" data-message-bubble="${message.id}">
-                  ${quotedBlock}
-                  ${imageBlock}
-                  ${message.text ? `<p>${message.text}</p>` : ""}
-                </div>
-                ${favoriteBadge}
-              </div>
+              ${
+                hasStickerOnly
+                  ? renderStickerImageMessage(message)
+                  : `
+                    <div class="message-bubble-shell">
+                      <div class="message-bubble message-bubble--ai" data-message-bubble="${message.id}">
+                        ${quotedBlock}
+                        ${imageBlock}
+                        ${message.text ? `<p>${message.text}</p>` : ""}
+                      </div>
+                      ${favoriteBadge}
+                    </div>
+                  `
+              }
               <div class="message-meta">
                 <span>${message.timestamp}</span>
               </div>
@@ -2637,6 +2881,143 @@ function renderAttachmentPreview() {
       <div class="pending-attachment-meta">
         <span>${appState.pendingAttachment.name}</span>
         <button type="button" class="pending-attachment-remove" data-action="clear-attachment" aria-label="Remove attachment">×</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStickerStoreScreen() {
+  const packs = getStickerPacks();
+  const draft = appState.stickerPackDraft;
+
+  if (appState.stickerStoreView === "editor" && draft) {
+    return `
+      <div class="messages-pane sticker-store-pane">
+        <div class="messages-header">
+          <button type="button" class="messages-back" data-action="close-sticker-pack-editor" aria-label="Back to packs">
+            ${iconSvg("back")}
+          </button>
+          <div class="messages-header-title">Sticker Pack</div>
+          <div class="messages-header-spacer"></div>
+        </div>
+
+        <input type="file" accept="image/png,image/*" hidden data-role="sticker-upload-input" multiple />
+
+        <section class="sticker-store-card">
+          <label class="chat-settings-stack-row">
+            <span class="chat-settings-row-title">Pack Name</span>
+            <input type="text" class="chat-settings-text-input" data-role="sticker-pack-name-input" value="${escapeAttribute(draft.name)}" />
+          </label>
+          <button type="button" class="sticker-store-upload" data-action="pick-sticker-files">Upload Stickers</button>
+        </section>
+
+        <section class="sticker-store-list">
+          ${
+            (draft.stickers || []).length
+              ? draft.stickers
+                  .map(
+                    (sticker) => `
+                      <article class="sticker-store-item">
+                        <div class="sticker-store-thumb">
+                          <img src="${escapeAttribute(sticker.imageDataUrl)}" alt="${escapeAttribute(sticker.name || "Sticker")}" />
+                        </div>
+                        <div class="sticker-store-fields">
+                          <input type="text" class="chat-settings-text-input" data-role="sticker-name-input" data-sticker-id="${sticker.id}" value="${escapeAttribute(sticker.name)}" placeholder="Sticker name" />
+                          <textarea class="chat-settings-textarea sticker-store-textarea" data-role="sticker-description-input" data-sticker-id="${sticker.id}" placeholder="Mood / description">${escapeHtml(sticker.description)}</textarea>
+                        </div>
+                      </article>
+                    `,
+                  )
+                  .join("")
+              : `<div class="messages-empty messages-empty-card"><div class="messages-empty-title">No stickers yet</div><p>Upload PNG stickers to start this pack.</p></div>`
+          }
+        </section>
+
+        <button type="button" class="character-save-button" data-action="save-sticker-pack">Save Pack</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="messages-pane sticker-store-pane">
+      <div class="messages-header">
+        <button type="button" class="messages-back" data-action="close-sticker-store" aria-label="Back to settings">
+          ${iconSvg("back")}
+        </button>
+        <div class="messages-header-title">Emoji Store</div>
+        <div class="messages-header-spacer"></div>
+      </div>
+
+      <button type="button" class="contacts-add-button" data-action="create-sticker-pack" aria-label="Create new pack">
+        <span class="contacts-add-icon">+</span>
+        <span>Create New Pack</span>
+      </button>
+
+      <section class="sticker-store-list">
+        ${
+          packs.length
+            ? packs
+                .map(
+                  (pack) => `
+                    <button type="button" class="sticker-pack-card" data-action="edit-sticker-pack" data-pack-id="${pack.id}">
+                      <div class="sticker-pack-preview">
+                        ${
+                          stickerPackPreview(pack)
+                            ? `<img src="${escapeAttribute(stickerPackPreview(pack))}" alt="${escapeAttribute(pack.name)} preview" />`
+                            : `<div class="app-fallback">PK</div>`
+                        }
+                      </div>
+                      <div class="sticker-pack-copy">
+                        <h3>${pack.name}</h3>
+                        <p>${pack.stickers.length} sticker${pack.stickers.length === 1 ? "" : "s"}</p>
+                      </div>
+                    </button>
+                  `,
+                )
+                .join("")
+            : `<div class="messages-empty messages-empty-card"><div class="messages-empty-title">No packs yet</div><p>Create a sticker pack to use stickers in chat.</p></div>`
+        }
+      </section>
+    </div>
+  `;
+}
+
+function renderStickerPicker() {
+  const packs = getStickerPacks();
+  if (!appState.stickerPickerOpen || !packs.length) {
+    return "";
+  }
+
+  const activePackId = appState.activeStickerPackId || packs[0]?.id;
+  const activePack = getStickerPack(activePackId) || packs[0];
+
+  return `
+    <div class="sticker-picker">
+      <div class="sticker-picker-grid">
+        ${(activePack?.stickers || [])
+          .map(
+            (sticker) => `
+              <button type="button" class="sticker-picker-item" data-action="send-sticker" data-sticker-id="${sticker.id}">
+                <img src="${escapeAttribute(sticker.imageDataUrl)}" alt="${escapeAttribute(sticker.name)}" />
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="sticker-picker-packs">
+        ${packs
+          .map(
+            (pack) => `
+              <button type="button" class="sticker-pack-tab ${pack.id === activePack?.id ? "is-active" : ""}" data-action="switch-sticker-pack" data-pack-id="${pack.id}">
+                ${
+                  stickerPackPreview(pack)
+                    ? `<img src="${escapeAttribute(stickerPackPreview(pack))}" alt="${escapeAttribute(pack.name)}" />`
+                    : `<span>${pack.name.slice(0, 2)}</span>`
+                }
+              </button>
+            `,
+          )
+          .join("")}
       </div>
     </div>
   `;
@@ -2831,6 +3212,17 @@ function renderChatSettingsScreen(conversationId) {
               <h3>Individual Customization</h3>
             </div>
             <div class="chat-settings-card">
+              ${renderToggleField("Allow AI to use Stickers", "allow-ai-stickers-toggle", !!profile.allowAiStickers, "Lets this character attach matching stickers after replies.")}
+              <label class="chat-settings-row">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">AI Sticker Frequency</span>
+                  <span class="chat-settings-row-detail">${profile.aiStickerFrequency === "high" ? "More expressive, but still human." : "Occasional use only when it fits strongly."}</span>
+                </span>
+                <select class="chat-settings-inline-select" data-role="ai-sticker-frequency-select">
+                  <option value="low" ${profile.aiStickerFrequency !== "high" ? "selected" : ""}>Low</option>
+                  <option value="high" ${profile.aiStickerFrequency === "high" ? "selected" : ""}>High</option>
+                </select>
+              </label>
               <button type="button" class="chat-settings-row chat-settings-action" data-action="pick-wallpaper">
                 <span class="chat-settings-row-copy">
                   <span class="chat-settings-row-title">Change Chat Wallpaper</span>
@@ -2883,6 +3275,7 @@ function renderChatComposer(conversationId) {
     <div class="chat-composer-wrap">
       ${renderQuotedReplyBar()}
       ${renderAttachmentPreview()}
+      ${renderStickerPicker()}
       ${renderAttachmentMenu()}
       <div class="chat-composer ${disabled ? "is-disabled" : ""}">
         <button
@@ -2903,7 +3296,7 @@ function renderChatComposer(conversationId) {
             ${disabled ? "disabled" : ""}
           >${draft}</textarea>
         </div>
-        <button type="button" class="composer-icon-button" aria-label="Emoji picker" ${disabled ? "disabled" : ""}>
+        <button type="button" class="composer-icon-button" data-action="toggle-sticker-picker" aria-label="Emoji picker" ${disabled ? "disabled" : ""}>
           ${iconSvg("emoji")}
         </button>
         <button type="button" class="composer-icon-button" data-action="toggle-attachment-menu" aria-label="Attachments" ${disabled ? "disabled" : ""}>
@@ -3012,6 +3405,10 @@ function renderMessagesBody() {
 
   if (appState.messagesView === "character-editor" && appState.characterEditorId) {
     return renderCharacterEditorScreen();
+  }
+
+  if (appState.messagesView === "sticker-store") {
+    return renderStickerStoreScreen();
   }
 
   const tabs = {
@@ -3159,11 +3556,14 @@ function mountSettingsInputs(root) {
   const momentsIntervalInput = root.querySelector("[data-role='moments-interval-input']");
   const blockToggle = root.querySelector("[data-role='block-toggle']");
   const nicknameInput = root.querySelector("[data-role='nickname-input']");
+  const allowAiStickersToggle = root.querySelector("[data-role='allow-ai-stickers-toggle']");
+  const aiStickerFrequencySelect = root.querySelector("[data-role='ai-sticker-frequency-select']");
   const characterDisplayNameInput = root.querySelector("[data-role='character-display-name-input']");
   const characterAiNicknameInput = root.querySelector("[data-role='character-ai-nickname-input']");
   const characterPromptInput = root.querySelector("[data-role='character-prompt-input']");
   const characterGlobalWordbookToggle = root.querySelector("[data-role='character-global-wordbook-toggle']");
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
+  const stickerPackNameInput = root.querySelector("[data-role='sticker-pack-name-input']");
 
   if (activeApiProfileSelect) {
     activeApiProfileSelect.addEventListener("change", (event) => {
@@ -3324,6 +3724,18 @@ function mountSettingsInputs(root) {
     });
   }
 
+  if (allowAiStickersToggle) {
+    allowAiStickersToggle.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { allowAiStickers: event.target.checked });
+    });
+  }
+
+  if (aiStickerFrequencySelect) {
+    aiStickerFrequencySelect.addEventListener("change", (event) => {
+      updateProfile(currentConversationId(), { aiStickerFrequency: event.target.value === "high" ? "high" : "low" });
+    });
+  }
+
   if (characterDisplayNameInput) {
     characterDisplayNameInput.addEventListener("input", (event) => {
       appState.characterDraft = {
@@ -3382,6 +3794,55 @@ function mountSettingsInputs(root) {
       };
     });
   }
+
+  if (stickerPackNameInput) {
+    stickerPackNameInput.addEventListener("input", (event) => {
+      appState.stickerPackDraft = {
+        ...(appState.stickerPackDraft || createBlankStickerPack()),
+        name: event.target.value,
+      };
+    });
+  }
+
+  root.querySelectorAll("[data-role='sticker-name-input']").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const stickerId = event.target.dataset.stickerId;
+      if (!stickerId || !appState.stickerPackDraft) {
+        return;
+      }
+      appState.stickerPackDraft = {
+        ...appState.stickerPackDraft,
+        stickers: appState.stickerPackDraft.stickers.map((sticker) =>
+          sticker.id === stickerId
+            ? {
+                ...sticker,
+                name: event.target.value,
+              }
+            : sticker,
+        ),
+      };
+    });
+  });
+
+  root.querySelectorAll("[data-role='sticker-description-input']").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const stickerId = event.target.dataset.stickerId;
+      if (!stickerId || !appState.stickerPackDraft) {
+        return;
+      }
+      appState.stickerPackDraft = {
+        ...appState.stickerPackDraft,
+        stickers: appState.stickerPackDraft.stickers.map((sticker) =>
+          sticker.id === stickerId
+            ? {
+                ...sticker,
+                description: event.target.value,
+              }
+            : sticker,
+        ),
+      };
+    });
+  });
 }
 
 async function testApiProfileDraft() {
@@ -3424,6 +3885,7 @@ function mountFileInputs(root) {
   const wallpaperInput = root.querySelector("[data-role='wallpaper-input']");
   const attachmentInput = root.querySelector("[data-role='attachment-input']");
   const characterAvatarInput = root.querySelector("[data-role='character-avatar-input']");
+  const stickerUploadInput = root.querySelector("[data-role='sticker-upload-input']");
 
   if (wallpaperInput) {
     wallpaperInput.addEventListener("change", async (event) => {
@@ -3469,6 +3931,32 @@ function mountFileInputs(root) {
       appState.characterDraft = {
         ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
         avatar: dataUrl,
+      };
+      render();
+    });
+  }
+
+  if (stickerUploadInput) {
+    stickerUploadInput.addEventListener("change", async (event) => {
+      const files = Array.from(event.target.files || []);
+      if (!files.length || !appState.stickerPackDraft) {
+        return;
+      }
+
+      const nextStickers = [];
+      for (const file of files) {
+        const imageDataUrl = await readFileAsDataUrl(file);
+        nextStickers.push({
+          id: nextStickerId(),
+          name: file.name.replace(/\.[^.]+$/, ""),
+          description: "",
+          imageDataUrl,
+        });
+      }
+
+      appState.stickerPackDraft = {
+        ...appState.stickerPackDraft,
+        stickers: [...(appState.stickerPackDraft.stickers || []), ...nextStickers],
       };
       render();
     });
@@ -3590,8 +4078,53 @@ function handleAction(action, button) {
     appState.activeConversationId = null;
     appState.characterEditorId = null;
     appState.characterDraft = null;
+    appState.stickerStoreView = "packs";
+    appState.editingStickerPackId = null;
+    appState.stickerPackDraft = null;
     appState.chatView = "conversation";
     appState.attachmentMenuOpen = false;
+    appState.stickerPickerOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "open-sticker-store") {
+    openStickerStore();
+    render();
+    return;
+  }
+
+  if (action === "close-sticker-store") {
+    closeStickerStore();
+    render();
+    return;
+  }
+
+  if (action === "create-sticker-pack") {
+    openStickerPackEditor();
+    render();
+    return;
+  }
+
+  if (action === "edit-sticker-pack") {
+    openStickerPackEditor(button.dataset.packId || "");
+    render();
+    return;
+  }
+
+  if (action === "close-sticker-pack-editor") {
+    closeStickerPackEditor();
+    render();
+    return;
+  }
+
+  if (action === "pick-sticker-files") {
+    rootNode?.querySelector("[data-role='sticker-upload-input']")?.click();
+    return;
+  }
+
+  if (action === "save-sticker-pack") {
+    persistStickerPackDraft();
     render();
     return;
   }
@@ -3667,8 +4200,37 @@ function handleAction(action, button) {
     return;
   }
 
+  if (action === "toggle-sticker-picker") {
+    appState.stickerPickerOpen = !appState.stickerPickerOpen;
+    if (!appState.activeStickerPackId && getStickerPacks()[0]) {
+      appState.activeStickerPackId = getStickerPacks()[0].id;
+    }
+    render();
+    return;
+  }
+
   if (action === "send-message") {
     sendMessage(currentConversationId());
+    return;
+  }
+
+  if (action === "switch-sticker-pack") {
+    appState.activeStickerPackId = button.dataset.packId || appState.activeStickerPackId;
+    render();
+    return;
+  }
+
+  if (action === "send-sticker") {
+    const found = findStickerById(button.dataset.stickerId);
+    if (!found) {
+      return;
+    }
+    sendStickerMessage(currentConversationId(), {
+      ...found.sticker,
+      packId: found.pack.id,
+    });
+    render();
+    requestAIResponse(currentConversationId(), getConversation(currentConversationId()).slice(-1)[0].id);
     return;
   }
 
