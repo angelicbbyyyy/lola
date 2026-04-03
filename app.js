@@ -2672,8 +2672,8 @@ async function observeMoments(post) {
         continue;
       }
 
-      const commentText = processAIResponse(result).text || String(result).trim();
-      if (!commentText) {
+      const nextComments = buildMomentCharacterComments(profile, result);
+      if (!nextComments.length) {
         continue;
       }
 
@@ -2685,16 +2685,7 @@ async function observeMoments(post) {
                 ...entry,
                 comments: [
                   ...(entry.comments || []),
-                  {
-                    id: nextMomentCommentId(),
-                    authorType: "character",
-                    characterId: profile.id,
-                    authorName: profile.name,
-                    authorAvatar: profile.avatar,
-                    text: commentText,
-                    createdAt: Date.now(),
-                    replies: [],
-                  },
+                  ...nextComments,
                 ],
               }
             : entry,
@@ -2751,6 +2742,22 @@ function deleteMomentPost(postId) {
   if (appState.momentsReplyTarget?.postId === postId) {
     appState.momentsReplyTarget = null;
   }
+}
+
+function buildMomentCharacterComments(profile, rawText, replies = []) {
+  const processed = processAIResponse(rawText);
+  return (processed.bubbleParts || [])
+    .filter(Boolean)
+    .map((text, index) => ({
+      id: nextMomentCommentId(),
+      authorType: "character",
+      characterId: profile.id,
+      authorName: profile.name,
+      authorAvatar: profile.avatar,
+      text,
+      createdAt: Date.now() + index,
+      replies: index === 0 ? replies : [],
+    }));
 }
 
 async function submitMomentReply(postId) {
@@ -2816,8 +2823,8 @@ async function submitMomentReply(postId) {
         content: [{ type: "input_text", text: `Character prompt: ${targetProfile.characterPrompt || targetProfile.worldbook || ""}\nThread:\n${threadContext}` }],
       },
     ]);
-    const cleanReply = processAIResponse(reply).text || String(reply).trim();
-    if (!cleanReply) {
+    const nextReplies = buildMomentCharacterComments(targetProfile, reply);
+    if (!nextReplies.length) {
       return;
     }
     const freshDb = getMomentsDb();
@@ -2832,15 +2839,7 @@ async function submitMomentReply(postId) {
                       ...commentEntry,
                       replies: [
                         ...(commentEntry.replies || []),
-                        {
-                          id: nextMomentCommentId(),
-                          authorType: "character",
-                          characterId: targetProfile.id,
-                          authorName: targetProfile.name,
-                          authorAvatar: targetProfile.avatar,
-                          text: cleanReply,
-                          createdAt: Date.now(),
-                        },
+                        ...nextReplies,
                       ],
                     }
                   : commentEntry,
