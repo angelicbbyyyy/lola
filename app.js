@@ -1079,11 +1079,9 @@ function buildOpenAIInput(conversationId) {
 
   uniqueHistory.forEach((message) => {
     const content = [];
-    if (message.quotedMessageText) {
-      content.push({ type: "input_text", text: `Quoted earlier message for context: "${message.quotedMessageText}"` });
-    }
-    if (message.text) {
-      content.push({ type: "input_text", text: message.text });
+    const textForModel = buildMessageTextForModel(message);
+    if (textForModel) {
+      content.push({ type: "input_text", text: textForModel });
     }
     if (message.imageDataUrl) {
       content.push({ type: "input_image", image_url: message.imageDataUrl });
@@ -1098,6 +1096,17 @@ function buildOpenAIInput(conversationId) {
   });
 
   return input;
+}
+
+function buildMessageTextForModel(message) {
+  const parts = [];
+  if (message.quotedMessageText) {
+    parts.push(`Quoted earlier message for context: "${message.quotedMessageText}"`);
+  }
+  if (message.text) {
+    parts.push(message.text);
+  }
+  return parts.filter(Boolean).join("\n\n").trim();
 }
 
 function buildAutomationInput(conversationId, mode) {
