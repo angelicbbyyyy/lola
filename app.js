@@ -1762,21 +1762,23 @@ function renderChatsTab() {
   const rows = visibleProfiles.map((profile) => {
     const lastMessage = latestVisibleMessage(profile.id);
     return `
-      <button type="button" class="chat-row chat-row-button" data-action="open-chat" data-conversation="${profile.id}">
-        <div class="chat-avatar">
-          ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
-        </div>
-        <div class="chat-copy">
-          <div class="chat-name">${profile.name}</div>
-          <div class="chat-preview">${messagePreview(lastMessage) || profile.subtitle || "Start the conversation…"}</div>
-        </div>
-        <div class="chat-meta">
-          <div class="chat-time">${lastMessage?.timestamp || ""}</div>
-          <button type="button" class="chat-delete" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete sample conversation">
-            ${iconSvg("delete")}
-          </button>
-        </div>
-      </button>
+      <div class="chat-row">
+        <button type="button" class="chat-row-main" data-action="open-chat" data-conversation="${profile.id}">
+          <div class="chat-avatar">
+            ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
+          </div>
+          <div class="chat-copy">
+            <div class="chat-name-row">
+              <span class="chat-name">${profile.name}</span>
+              <span class="chat-time">${lastMessage?.timestamp || ""}</span>
+            </div>
+            <div class="chat-preview">${messagePreview(lastMessage) || profile.subtitle || "Start the conversation…"}</div>
+          </div>
+        </button>
+        <button type="button" class="chat-delete" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete">
+          ${iconSvg("delete")}
+        </button>
+      </div>
     `;
   });
 
