@@ -1,5 +1,6 @@
 const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
+const STORAGE_BACKUP_KEY = "lola_chat_engine_v1_backup";
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
@@ -345,52 +346,141 @@ function normalizeProfile(profile, defaults) {
   };
 }
 
+function tryParseStoredJson(raw) {
+  if (!raw || typeof raw !== "string") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function pickLongerArray(a, b) {
+  const ar = Array.isArray(a) ? a : [];
+  const br = Array.isArray(b) ? b : [];
+  return ar.length >= br.length ? ar : br;
+}
+
+function mergeConversationMessageLists(primary, backup) {
+  const p = primary && typeof primary === "object" ? primary : {};
+  const q = backup && typeof backup === "object" ? backup : {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(q)]);
+  const out = {};
+  for (const id of keys) {
+    const a = Array.isArray(p[id]) ? p[id] : [];
+    const b = Array.isArray(q[id]) ? q[id] : [];
+    out[id] = a.length >= b.length ? a : b;
+  }
+  return out;
+}
+
+function mergeKeyedArrays(primary, backup) {
+  const p = primary && typeof primary === "object" ? primary : {};
+  const q = backup && typeof backup === "object" ? backup : {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(q)]);
+  const out = {};
+  for (const id of keys) {
+    const a = Array.isArray(p[id]) ? p[id] : [];
+    const b = Array.isArray(q[id]) ? q[id] : [];
+    out[id] = a.length >= b.length ? a : b;
+  }
+  return out;
+}
+
+function mergeTwoRawSnapshots(primary, backup) {
+  if (!primary) {
+    return backup;
+  }
+  if (!backup) {
+    return primary;
+  }
+  return {
+    appSettings: {
+      ...(backup.appSettings || {}),
+      ...(primary.appSettings || {}),
+      apiProfiles: {
+        ...(backup.appSettings?.apiProfiles || {}),
+        ...(primary.appSettings?.apiProfiles || {}),
+      },
+    },
+    characterProfiles: {
+      ...(backup.characterProfiles || {}),
+      ...(primary.characterProfiles || {}),
+    },
+    conversations: mergeConversationMessageLists(primary.conversations, backup.conversations),
+    momentsPosts: pickLongerArray(primary.momentsPosts, backup.momentsPosts),
+    favoritesLibrary: { ...(backup.favoritesLibrary || {}), ...(primary.favoritesLibrary || {}) },
+    memories: mergeKeyedArrays(primary.memories, backup.memories),
+    conversationArchives: mergeKeyedArrays(primary.conversationArchives, backup.conversationArchives),
+    stickerPacks: pickLongerArray(primary.stickerPacks, backup.stickerPacks),
+  };
+}
+
+function normalizePersistedSnapshot(defaults, parsed) {
+  const parsedProfiles = parsed.appSettings?.apiProfiles || {};
+  return {
+    appSettings: {
+      ...defaults.appSettings,
+      ...(parsed.appSettings || {}),
+      activeApiProfileId: parsed.appSettings?.activeApiProfileId || defaults.appSettings.activeApiProfileId,
+      lastActiveConversationId:
+        typeof parsed.appSettings?.lastActiveConversationId === "string" && parsed.appSettings.lastActiveConversationId.trim()
+          ? parsed.appSettings.lastActiveConversationId.trim()
+          : defaults.appSettings.lastActiveConversationId,
+      apiProfiles: {
+        ...defaults.appSettings.apiProfiles,
+        ...parsedProfiles,
+      },
+    },
+    characterProfiles: {
+      ...Object.fromEntries(
+        Object.entries({
+          ...defaults.characterProfiles,
+          ...(parsed.characterProfiles || {}),
+        }).map(([id, profile]) => [id, normalizeProfile(profile, defaults.characterProfiles["angel-bunny"])]),
+      ),
+    },
+    conversations: {
+      ...defaults.conversations,
+      ...(parsed.conversations || {}),
+    },
+    momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
+    favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
+    stickerPacks: Array.isArray(parsed.stickerPacks) ? parsed.stickerPacks : defaults.stickerPacks,
+    memories: parsed.memories && typeof parsed.memories === "object" ? parsed.memories : defaults.memories,
+    conversationArchives:
+      parsed.conversationArchives && typeof parsed.conversationArchives === "object"
+        ? parsed.conversationArchives
+        : defaults.conversationArchives,
+  };
+}
+
 function loadChatState() {
   const defaults = createDefaultPersistedState();
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
+    const rawPrimary = window.localStorage.getItem(STORAGE_KEY);
+    const rawBackup = window.localStorage.getItem(STORAGE_BACKUP_KEY);
+    const parsedPrimary = tryParseStoredJson(rawPrimary);
+    const parsedBackup = tryParseStoredJson(rawBackup);
+
+    if (!parsedPrimary && !parsedBackup) {
       return defaults;
     }
 
-    const parsed = JSON.parse(raw);
-    const parsedProfiles = parsed.appSettings?.apiProfiles || {};
-    return {
-      appSettings: {
-        ...defaults.appSettings,
-        ...(parsed.appSettings || {}),
-        activeApiProfileId: parsed.appSettings?.activeApiProfileId || defaults.appSettings.activeApiProfileId,
-        lastActiveConversationId:
-          typeof parsed.appSettings?.lastActiveConversationId === "string" && parsed.appSettings.lastActiveConversationId.trim()
-            ? parsed.appSettings.lastActiveConversationId.trim()
-            : defaults.appSettings.lastActiveConversationId,
-        apiProfiles: {
-          ...defaults.appSettings.apiProfiles,
-          ...parsedProfiles,
-        },
-      },
-      characterProfiles: {
-        ...Object.fromEntries(
-          Object.entries({
-            ...defaults.characterProfiles,
-            ...(parsed.characterProfiles || {}),
-          }).map(([id, profile]) => [id, normalizeProfile(profile, defaults.characterProfiles["angel-bunny"])]),
-        ),
-      },
-      conversations: {
-        ...defaults.conversations,
-        ...(parsed.conversations || {}),
-      },
-      momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
-      favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
-      stickerPacks: Array.isArray(parsed.stickerPacks) ? parsed.stickerPacks : defaults.stickerPacks,
-      memories: parsed.memories && typeof parsed.memories === "object" ? parsed.memories : defaults.memories,
-      conversationArchives:
-        parsed.conversationArchives && typeof parsed.conversationArchives === "object"
-          ? parsed.conversationArchives
-          : defaults.conversationArchives,
-    };
+    const merged = mergeTwoRawSnapshots(parsedPrimary, parsedBackup);
+    const state = normalizePersistedSnapshot(defaults, merged);
+    if (parsedPrimary && !rawBackup) {
+      try {
+        writeStoragePayload(JSON.stringify(state));
+      } catch (_error) {
+        // Backup seed is best-effort; primary already exists.
+      }
+    }
+    return state;
   } catch (error) {
     console.warn("Unable to load saved chat state:", error);
     return defaults;
@@ -426,16 +516,25 @@ function deleteApiProfile(profileId) {
   saveChatState();
 }
 
+function writeStoragePayload(json) {
+  window.localStorage.setItem(STORAGE_KEY, json);
+  try {
+    window.localStorage.setItem(STORAGE_BACKUP_KEY, json);
+  } catch (_error) {
+    // Best-effort mirror; some browsers may only fit one copy within quota.
+  }
+}
+
 function saveChatState() {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
+    writeStoragePayload(JSON.stringify(persistedState));
     appState.storageWarningMessage = "";
   } catch (error) {
     console.warn("Unable to save chat state:", error);
     if (isQuotaExceededError(error)) {
       try {
         persistedState = buildStorageSafeSnapshot(persistedState);
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
+        writeStoragePayload(JSON.stringify(persistedState));
         appState.storageWarningMessage =
           "Storage was full. Older image attachments were trimmed so recent messages can still save.";
         if (typeof rootNode !== "undefined" && rootNode) {
