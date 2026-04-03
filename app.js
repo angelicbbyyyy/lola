@@ -955,6 +955,7 @@ function buildAutomationInput(conversationId, mode) {
   const profile = getProfile(conversationId);
   const latestMessage = latestVisibleMessage(conversationId);
   const latestSummary = messagePreview(latestMessage);
+  const unansweredCount = countUnansweredProactiveMessages(conversationId);
   const baseInstruction =
     mode === "moment"
       ? [
@@ -971,13 +972,20 @@ function buildAutomationInput(conversationId, mode) {
       : [
           "Send one proactive in-character message to the user.",
           "This is not a reply. You are reaching out first because time passed and you noticed their silence.",
-          "This should feel like a realistic check-in, not a random interruption.",
+          "This should feel like a realistic clingy or caring follow-up, not a random interruption.",
           "Only send something you would genuinely text after waiting and noticing the gap.",
           formatElapsedContext(profile.lastUserMessageAt),
+          `This is unanswered reach-out number ${unansweredCount + 1}.`,
+          unansweredCount === 0
+            ? "Make it soft and easy, like a first little check-in."
+            : unansweredCount === 1
+              ? "Make it a bit more direct or needy, like you noticed they still did not answer."
+              : "Make it feel more restless, clingy, worried, or annoyed in-character, like multiple texts after being ignored.",
           latestSummary ? `Last visible chat context: ${latestSummary}.` : "",
           profile.timeAwareness ? `Use the local time naturally: ${currentTimeContext()}.` : "",
           "Keep it to 1 or 2 short text-message lines, gentle and natural.",
-          "Do not suddenly change topics or send something loud, dramatic, or repetitive.",
+          "Do not suddenly change topics, but it is okay to send follow-up energy if the user is still silent.",
+          "Avoid repeating the exact same wording as prior proactive messages.",
           "Do not explain that you are an AI or mention prompts.",
         ];
 
@@ -1015,11 +1023,29 @@ async function requestGeneratedMomentPost(conversationId) {
   return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "moment"));
 }
 
+function countUnansweredProactiveMessages(conversationId) {
+  const messages = getConversation(conversationId).filter((message) => !message.typing && !message.failed);
+  let count = 0;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      break;
+    }
+    if (message.role === "ai" && message.metaType === "spontaneous") {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
 function shouldAllowProactiveReachout(profile, now) {
   const proactiveIntervalMs = normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES) * 60 * 1000;
   const lastUserAt = Number(profile.lastUserMessageAt) || 0;
   const lastCharacterAt = Number(profile.lastCharacterMessageAt) || 0;
-  const latestMessage = latestVisibleMessage(profile.id);
+  const unansweredCount = countUnansweredProactiveMessages(profile.id);
+  const anchorTime = lastCharacterAt > lastUserAt ? lastCharacterAt : lastUserAt;
 
   if (!profile.proactiveMessaging || !canUseActiveApiProfile()) {
     return false;
@@ -1029,15 +1055,11 @@ function shouldAllowProactiveReachout(profile, now) {
     return false;
   }
 
-  if (latestMessage?.role === "ai") {
-    return false;
+  if (unansweredCount >= 4) {
+      return false;
   }
 
-  if (lastCharacterAt && lastCharacterAt > lastUserAt) {
-    return false;
-  }
-
-  return now - lastUserAt >= proactiveIntervalMs;
+  return now - anchorTime >= proactiveIntervalMs;
 }
 
 function shouldAllowMomentsPost(profile, now) {
