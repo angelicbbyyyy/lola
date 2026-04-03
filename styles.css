@@ -1095,21 +1095,22 @@ button {
 }
 
 .chat-surface.has-wallpaper::before {
-  background: rgba(0, 0, 0, 0.12);
+  display: none;
 }
 
 .chat-surface.has-wallpaper .message-bubble--ai {
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+  background: #ffffff;
+  border: none;
+  box-shadow: none;
 }
 
 .chat-surface.has-wallpaper .message-bubble--user {
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+  background: #efefef;
+  box-shadow: none;
 }
 
 .chat-surface.has-wallpaper .message-bubble--user::after {
-  background: rgba(255, 255, 255, 0.88);
+  background: #efefef;
 }
 
 .chat-header {
@@ -1176,7 +1177,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px 0 18px;
+  padding: 16px 0 18px;
   z-index: 1;
 }
 
@@ -1239,7 +1240,6 @@ button {
 }
 
 .message-bubble--ai {
-  border: 0.5px solid rgba(79, 79, 79, 0.08);
   background: #ffffff;
 }
 
