@@ -1605,7 +1605,9 @@ function messagePreview(message) {
 }
 
 function latestVisibleMessage(conversationId) {
-  const messages = getConversation(conversationId).filter((message) => !message.typing);
+  const messages = getConversation(conversationId).filter(
+    (message) => !message.typing && message.metaType !== "archive-placeholder",
+  );
   return messages[messages.length - 1] || null;
 }
 
@@ -1708,7 +1710,8 @@ function recentLiveMessages(conversationId, limit = 20) {
         !message.typing &&
         !message.failed &&
         message.metaType !== "assistant-sticker" &&
-        message.metaType !== "archive-placeholder",
+        message.metaType !== "archive-placeholder" &&
+        !message.archivedForContext,
     )
     .slice(-limit);
 }
@@ -1853,7 +1856,8 @@ async function summarizeConversationChunk(characterId) {
       !message.typing &&
       !message.failed &&
       message.metaType !== "assistant-sticker" &&
-      message.metaType !== "archive-placeholder",
+      message.metaType !== "archive-placeholder" &&
+      !message.archivedForContext,
   );
 
   if (compressible.length < 50) {
@@ -1900,8 +1904,15 @@ async function summarizeConversationChunk(characterId) {
     setConversationArchives(characterId, [archiveEntry, ...archives].slice(0, 40));
 
     const chunkIds = new Set(targetChunk.map((message) => message.id));
-    const remainder = messages.filter((message) => !chunkIds.has(message.id));
-    persistedState.conversations[characterId] = [buildArchivePlaceholder(cleanSummary), ...remainder];
+    persistedState.conversations[characterId] = messages.map((message) =>
+      chunkIds.has(message.id)
+        ? {
+            ...message,
+            archivedForContext: true,
+            archiveSummaryId: archiveEntry.id,
+          }
+        : message,
+    );
     saveChatState();
     return archiveEntry;
   } catch (error) {
@@ -2187,7 +2198,8 @@ function buildOpenAIInput(conversationId) {
       !message.typing &&
       !message.failed &&
       message.metaType !== "assistant-sticker" &&
-      message.metaType !== "archive-placeholder",
+      message.metaType !== "archive-placeholder" &&
+      !message.archivedForContext,
   );
   const recentHistory = allHistory.slice(-memoryLimit);
   const prioritized = profile.intelligentMemoryManagement
@@ -4361,6 +4373,10 @@ function renderStickerImageMessage(message) {
 }
 
 function renderMessage(conversationId, message) {
+  if (message.metaType === "archive-placeholder") {
+    return "";
+  }
+
   const profile = getProfile(conversationId);
   if (message.typing) {
     return renderTypingBubble(profile);
