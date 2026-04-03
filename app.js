@@ -5431,7 +5431,7 @@ function instagramIconSvg(name) {
 function renderInstagramStatusBar() {
   return `
     <header class="instagram-statusbar">
-      <div class="instagram-status-time">9:41</div>
+      <div id="status-time" class="status-time reference-mode">--:--</div>
       <div class="instagram-status-icons">
         <div class="instagram-status-icon">${imageMarkup(homeConfig.status.signalImage, "Mobile signal", "h-full w-full object-contain", "SIG")}</div>
         <div class="instagram-status-icon">${imageMarkup(homeConfig.status.wifiImage, "Wi-Fi", "h-full w-full object-contain", "WF")}</div>
