@@ -219,6 +219,20 @@ let statusClockInterval = null;
 let simulationLoopId = null;
 let messageSequence = 6;
 
+function syncMessageSequence() {
+  const maxConversationId = Object.values(persistedState?.conversations || {})
+    .flat()
+    .reduce((maxValue, message) => {
+      const match = String(message?.id || "").match(/^m-(\d+)$/);
+      if (!match) {
+        return maxValue;
+      }
+      return Math.max(maxValue, Number(match[1]));
+    }, 0);
+
+  messageSequence = Math.max(6, maxConversationId + 1);
+}
+
 function createDefaultPersistedState() {
   return {
     appSettings: {
@@ -5017,6 +5031,7 @@ function render() {
 
 function init() {
   persistedState = loadChatState();
+  syncMessageSequence();
   rootNode = document.getElementById("app");
 
   if (!rootNode) {
