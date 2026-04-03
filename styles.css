@@ -278,6 +278,19 @@ button {
   text-transform: uppercase;
 }
 
+.storage-warning-banner {
+  flex-shrink: 0;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 0.5px solid rgba(180, 120, 80, 0.35);
+  background: rgba(255, 236, 210, 0.92);
+  color: #5c4030;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .messages-app {
   position: relative;
   display: flex;

@@ -47,6 +47,7 @@ const appState = {
   memoryCharacterFilter: "all",
   memoryCategoryFilter: "all",
   memorySearchQuery: "",
+  storageWarningMessage: "",
 };
 
 const automationLocks = new Set();
@@ -238,6 +239,7 @@ function createDefaultPersistedState() {
   return {
     appSettings: {
       activeApiProfileId: "openai-default",
+      lastActiveConversationId: "angel-bunny",
       globalWordbook: "",
       apiProfiles: {
         "openai-default": {
@@ -359,6 +361,10 @@ function loadChatState() {
         ...defaults.appSettings,
         ...(parsed.appSettings || {}),
         activeApiProfileId: parsed.appSettings?.activeApiProfileId || defaults.appSettings.activeApiProfileId,
+        lastActiveConversationId:
+          typeof parsed.appSettings?.lastActiveConversationId === "string" && parsed.appSettings.lastActiveConversationId.trim()
+            ? parsed.appSettings.lastActiveConversationId.trim()
+            : defaults.appSettings.lastActiveConversationId,
         apiProfiles: {
           ...defaults.appSettings.apiProfiles,
           ...parsedProfiles,
@@ -423,9 +429,78 @@ function deleteApiProfile(profileId) {
 function saveChatState() {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
+    appState.storageWarningMessage = "";
   } catch (error) {
     console.warn("Unable to save chat state:", error);
+    if (isQuotaExceededError(error)) {
+      try {
+        persistedState = buildStorageSafeSnapshot(persistedState);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
+        appState.storageWarningMessage =
+          "Storage was full. Older image attachments were trimmed so recent messages can still save.";
+        if (typeof rootNode !== "undefined" && rootNode) {
+          render();
+        }
+        return;
+      } catch (retryError) {
+        console.warn("Retry after trimming storage payload failed:", retryError);
+      }
+    }
+    appState.storageWarningMessage = "Unable to save chat data locally. Recent messages may be lost after reload.";
+    if (typeof rootNode !== "undefined" && rootNode) {
+      render();
+    }
   }
+}
+
+function isQuotaExceededError(error) {
+  if (!error) {
+    return false;
+  }
+  const name = String(error.name || "");
+  const message = String(error.message || "").toLowerCase();
+  return (
+    name === "QuotaExceededError" ||
+    name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+    message.includes("quota") ||
+    message.includes("storage")
+  );
+}
+
+function buildStorageSafeSnapshot(state) {
+  const safeState = {
+    ...state,
+    conversations: {},
+  };
+  const conversations = state?.conversations && typeof state.conversations === "object" ? state.conversations : {};
+  for (const [conversationId, messages] of Object.entries(conversations)) {
+    if (!Array.isArray(messages)) {
+      safeState.conversations[conversationId] = [];
+      continue;
+    }
+    const clonedMessages = messages.map((message) => ({ ...message }));
+    let imageBudget = 8;
+    let stickerBudget = 8;
+    for (let index = clonedMessages.length - 1; index >= 0; index -= 1) {
+      const message = clonedMessages[index];
+      if (message.imageDataUrl) {
+        if (imageBudget > 0) {
+          imageBudget -= 1;
+        } else {
+          message.imageDataUrl = "";
+        }
+      }
+      if (message.stickerImageDataUrl) {
+        if (stickerBudget > 0) {
+          stickerBudget -= 1;
+        } else {
+          message.stickerImageDataUrl = "";
+        }
+      }
+    }
+    safeState.conversations[conversationId] = clonedMessages;
+  }
+  return safeState;
 }
 
 function getMemories(characterId) {
@@ -545,7 +620,7 @@ function updateProfile(id, patch) {
 }
 
 function currentConversationId() {
-  return appState.activeConversationId || "angel-bunny";
+  return appState.activeConversationId || persistedState?.appSettings?.lastActiveConversationId || "angel-bunny";
 }
 
 function currentProfile() {
@@ -1531,6 +1606,8 @@ function openConversation(conversationId) {
   appState.draftMessage = "";
   appState.pendingAttachment = null;
   appState.attachmentMenuOpen = false;
+  persistedState.appSettings.lastActiveConversationId = conversationId;
+  saveChatState();
 }
 
 function closeConversation() {
@@ -4032,6 +4109,11 @@ function renderMessagesScreen() {
     <div class="phone-shell phone-shell--messages">
       <div class="shell-inner shell-inner--messages">
         ${renderStatusBar()}
+        ${
+          appState.storageWarningMessage
+            ? `<div class="storage-warning-banner" role="status">${escapeHtml(appState.storageWarningMessage)}</div>`
+            : ""
+        }
         <div class="messages-app ${appState.messagesView === "chat" ? "messages-app--chat" : ""}">
           ${renderMessagesBody()}
           ${appState.messagesView === "chat" || appState.messagesView === "character-editor" ? "" : renderMessagesTabBar()}
@@ -4799,6 +4881,11 @@ function handleAction(action, button) {
       ...(persistedState.conversationArchives || {}),
       [profileId]: [],
     };
+    if (persistedState.appSettings.lastActiveConversationId === profileId) {
+      const fallbackId =
+        visibleCharacterProfiles().find((p) => p.id !== profileId)?.id || "angel-bunny";
+      persistedState.appSettings.lastActiveConversationId = fallbackId;
+    }
     saveChatState();
     if (appState.activeConversationId === profileId) {
       closeConversation();
@@ -5147,6 +5234,16 @@ function render() {
 
 function init() {
   persistedState = loadChatState();
+  const savedConversationId = persistedState.appSettings?.lastActiveConversationId;
+  const availableCharacterIds = Object.keys(persistedState.characterProfiles || {});
+  const restoredConversationId = availableCharacterIds.includes(savedConversationId)
+    ? savedConversationId
+    : availableCharacterIds[0] || "angel-bunny";
+  appState.activeConversationId = restoredConversationId;
+  if (restoredConversationId !== savedConversationId) {
+    persistedState.appSettings.lastActiveConversationId = restoredConversationId;
+    saveChatState();
+  }
   syncMessageSequence();
   rootNode = document.getElementById("app");
 
