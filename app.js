@@ -2738,6 +2738,21 @@ async function createUserMomentPost() {
   observeMoments(nextPost);
 }
 
+function deleteMomentPost(postId) {
+  if (!postId) {
+    return;
+  }
+
+  const db = getMomentsDb();
+  saveMomentsDb({
+    posts: db.posts.filter((post) => post.id !== postId),
+  });
+
+  if (appState.momentsReplyTarget?.postId === postId) {
+    appState.momentsReplyTarget = null;
+  }
+}
+
 async function submitMomentReply(postId) {
   if (!appState.momentsReplyTarget || appState.momentsReplyTarget.postId !== postId) {
     return;
@@ -3970,6 +3985,21 @@ function renderMomentsTab() {
                     <div class="moment-card-head-copy">
                       <div class="moment-card-name">${post.authorName}</div>
                     </div>
+                    ${
+                      post.authorType === "user"
+                        ? `
+                          <button
+                            type="button"
+                            class="moment-delete-button"
+                            data-action="delete-moment-post"
+                            data-post-id="${post.id}"
+                            aria-label="Delete Moment"
+                          >
+                            ${iconSvg("delete")}
+                          </button>
+                        `
+                        : ""
+                    }
                   </div>
                   ${post.text ? `<p>${post.text}</p>` : ""}
                   ${
@@ -5813,6 +5843,20 @@ function handleAction(action, button) {
 
   if (action === "toggle-moment-like") {
     toggleMomentLike(button.dataset.postId || "");
+    render();
+    return;
+  }
+
+  if (action === "delete-moment-post") {
+    const postId = button.dataset.postId || "";
+    if (!postId) {
+      return;
+    }
+    const confirmed = window.confirm("Delete this Moment and its comments?");
+    if (!confirmed) {
+      return;
+    }
+    deleteMomentPost(postId);
     render();
     return;
   }

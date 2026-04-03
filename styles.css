@@ -1045,6 +1045,24 @@ button {
   flex: 1;
 }
 
+.moment-delete-button {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.08);
+  color: var(--shell-text-faint);
+  flex-shrink: 0;
+}
+
+.moment-delete-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .moment-card-name {
   color: var(--shell-text);
   font-size: 15px;
