@@ -1244,7 +1244,9 @@ function closeCharacterEditor() {
 function buildOpenAIInput(conversationId) {
   const profile = getProfile(conversationId);
   const memoryLimit = Math.max(1, Number(profile.memoryMessageCount) || 30);
-  const allHistory = getConversation(conversationId).filter((message) => !message.typing && !message.failed);
+  const allHistory = getConversation(conversationId).filter(
+    (message) => !message.typing && !message.failed && message.metaType !== "assistant-sticker",
+  );
   const recentHistory = allHistory.slice(-memoryLimit);
   const prioritized = profile.intelligentMemoryManagement
     ? [
