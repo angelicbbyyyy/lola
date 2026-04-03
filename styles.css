@@ -30,6 +30,16 @@ body {
   color: var(--shell-text);
 }
 
+body.instagram-active {
+  background: #ffffff;
+  color: #111111;
+}
+
+#app-shell.app-shell--instagram {
+  max-width: none;
+  width: 100%;
+}
+
 button,
 input {
   font: inherit;

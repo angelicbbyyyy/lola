@@ -7675,6 +7675,10 @@ function render() {
     return;
   }
 
+  const instagramActive = appState.activeScreen === "instagram";
+  document.body.classList.toggle("instagram-active", instagramActive);
+  document.getElementById("app-shell")?.classList.toggle("app-shell--instagram", instagramActive);
+
   rootNode.innerHTML = renderApp();
   mountImageFallbacks(rootNode);
   wireInteractions(rootNode);
