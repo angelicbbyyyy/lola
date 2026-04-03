@@ -2434,10 +2434,17 @@ function renderChatSettingsScreen(conversationId) {
               <button type="button" class="chat-settings-row chat-settings-action" data-action="pick-wallpaper">
                 <span class="chat-settings-row-copy">
                   <span class="chat-settings-row-title">Change Chat Wallpaper</span>
-                  <span class="chat-settings-row-detail">${profile.chatWallpaper ? "Wallpaper selected" : "Choose an image from this device"}</span>
+                  <span class="chat-settings-row-detail">${profile.chatWallpaper ? "Wallpaper set — tap to change" : "Choose an image from this device"}</span>
                 </span>
                 <span class="contacts-chevron">></span>
               </button>
+              ${profile.chatWallpaper ? `
+              <button type="button" class="chat-settings-row chat-settings-action is-destructive" data-action="remove-wallpaper">
+                <span class="chat-settings-row-copy">
+                  <span class="chat-settings-row-title">Remove Wallpaper</span>
+                  <span class="chat-settings-row-detail">Restore default background</span>
+                </span>
+              </button>` : ""}
               <label class="chat-settings-stack-row">
                 <span class="chat-settings-row-title">Nickname</span>
                 <span class="chat-settings-row-detail">What the character calls you in replies.</span>
@@ -3186,6 +3193,12 @@ function handleAction(action, button) {
 
   if (action === "pick-wallpaper") {
     rootNode?.querySelector("[data-role='wallpaper-input']")?.click();
+    return;
+  }
+
+  if (action === "remove-wallpaper") {
+    updateProfile(currentConversationId(), { chatWallpaper: null });
+    render();
     return;
   }
 
