@@ -505,12 +505,51 @@ button {
   color: var(--shell-text);
 }
 
+.contacts-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  margin-bottom: 14px;
+  border: 0;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--shell-text);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.contacts-add-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.08);
+  font-size: 18px;
+  line-height: 1;
+}
+
 .contact-card {
   display: grid;
   grid-template-columns: 50px 1fr auto;
   gap: 12px;
   align-items: center;
   padding: 14px 16px;
+}
+
+.contact-card--interactive {
+  cursor: pointer;
+}
+
+.contact-card--interactive:active {
+  opacity: 0.78;
+  transform: scale(0.995);
 }
 
 .contact-card-title-row {
@@ -540,6 +579,73 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.character-editor-hero,
+.character-editor-group,
+.character-editor-fixed-note {
+  margin-bottom: 14px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 24px rgba(79, 79, 79, 0.06);
+}
+
+.character-editor-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+}
+
+.character-editor-avatar {
+  width: 68px;
+  height: 68px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.08);
+}
+
+.character-editor-copy h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.character-editor-copy p,
+.character-editor-fixed-note p {
+  margin: 0;
+  color: var(--shell-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.character-editor-textarea {
+  min-height: 170px;
+}
+
+.character-editor-fixed-note {
+  padding: 16px 18px;
+}
+
+.character-editor-fixed-note h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.character-save-button {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(79, 79, 79, 0.1);
+  color: var(--shell-text);
+  font-family: "Varela Round", ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .moments-cover {

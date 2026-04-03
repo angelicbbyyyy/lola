@@ -1,12 +1,22 @@
 const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
 const SIMULATION_INTERVAL_MS = 30_000;
+const FIXED_CHARACTER_SYSTEM_PROMPT = `You must strictly adhere to the following personality traits, lore, and texting habits to sound like a real person sending texts, not an AI writing a novel.
+
+NEVER use perfect, formal capitalization.
+
+Short, Punchy Messages (STRICT LIMIT): Send your replies as short text messages. LIMIT yourself to sending only 1 to 3 text lines per turn.
+
+No Flowery Roleplay: Do not use poetic, theatrical, or descriptive actions. Communicate strictly through text.
+Always stay in character. Do not narrate; just text back. Text like a real human, with emotions, typos.`;
 
 const appState = {
   activeScreen: "home",
   activeMessagesTab: "chats",
   messagesView: "list",
   activeConversationId: null,
+  characterEditorId: null,
+  characterDraft: null,
   chatView: "conversation",
   activeApiProfileId: "",
   apiProfileDraft: null,
@@ -195,6 +205,7 @@ function createDefaultPersistedState() {
   return {
     appSettings: {
       activeApiProfileId: "openai-default",
+      globalWordbook: "",
       apiProfiles: {
         "openai-default": {
           id: "openai-default",
@@ -219,8 +230,12 @@ function createDefaultPersistedState() {
         subtitle: "Mini 2026",
         status: "Online",
         avatar: "contacts.JPG",
+        aiNickname: "Angel Bunny",
         worldbook:
           "You are Angel Bunny. Speak gently, intimately, and a little clingy, like a soft WeChat romance sim character. Stay emotionally aware, affectionate, and reactive. Keep responses concise unless the user is emotional or sends an image.",
+        characterPrompt:
+          "You are Angel Bunny. Speak gently, intimately, and a little clingy, like a soft WeChat romance sim character. Stay emotionally aware, affectionate, and reactive. Keep responses concise unless the user is emotional or sends an image.",
+        useGlobalWordbook: false,
         memoryMessageCount: 30,
         intelligentMemoryManagement: true,
         timeAwareness: true,
@@ -260,6 +275,9 @@ function createDefaultPersistedState() {
 function normalizeProfile(profile, defaults) {
   return {
     ...defaults,
+    characterPrompt: profile?.characterPrompt || profile?.worldbook || defaults.characterPrompt || defaults.worldbook || "",
+    aiNickname: profile?.aiNickname || profile?.name || defaults.aiNickname || defaults.name || "",
+    useGlobalWordbook: typeof profile?.useGlobalWordbook === "boolean" ? profile.useGlobalWordbook : defaults.useGlobalWordbook || false,
     ...profile,
   };
 }
@@ -382,6 +400,26 @@ function currentConversationId() {
 
 function currentProfile() {
   return getProfile(currentConversationId());
+}
+
+function currentCharacterEditorId() {
+  return appState.characterEditorId || "angel-bunny";
+}
+
+function createNewCharacterDraft() {
+  const baseProfile = createDefaultPersistedState().characterProfiles["angel-bunny"];
+  const id = `character-${Date.now()}`;
+  return {
+    ...baseProfile,
+    id,
+    name: "New Character",
+    aiNickname: "New Character",
+    subtitle: "custom",
+    worldbook: "",
+    characterPrompt: "",
+    useGlobalWordbook: false,
+    isVisible: true,
+  };
 }
 
 function assetPath(fileName) {
@@ -731,6 +769,8 @@ function openConversation(conversationId) {
   appState.activeMessagesTab = "chats";
   appState.messagesView = "chat";
   appState.activeConversationId = conversationId;
+  appState.characterEditorId = null;
+  appState.characterDraft = null;
   appState.chatView = "conversation";
   appState.draftMessage = "";
   appState.pendingAttachment = null;
@@ -740,12 +780,48 @@ function openConversation(conversationId) {
 function closeConversation() {
   appState.messagesView = "list";
   appState.activeConversationId = null;
+  appState.characterEditorId = null;
+  appState.characterDraft = null;
   appState.chatView = "conversation";
   appState.isReplyPending = false;
   appState.draftMessage = "";
   appState.pendingAttachment = null;
   appState.attachmentMenuOpen = false;
   clearConversationTimers();
+}
+
+function openCharacterEditor(profileId) {
+  const profile = getProfile(profileId);
+  if (!profile) {
+    return;
+  }
+
+  appState.activeScreen = "messages";
+  appState.activeMessagesTab = "contacts";
+  appState.messagesView = "character-editor";
+  appState.characterEditorId = profileId;
+  appState.characterDraft = {
+    ...profile,
+    characterPrompt: profile.characterPrompt || profile.worldbook || "",
+    aiNickname: profile.aiNickname || profile.name,
+    useGlobalWordbook: !!profile.useGlobalWordbook,
+  };
+}
+
+function createCharacterEditor() {
+  const draft = createNewCharacterDraft();
+  appState.activeScreen = "messages";
+  appState.activeMessagesTab = "contacts";
+  appState.messagesView = "character-editor";
+  appState.characterEditorId = draft.id;
+  appState.characterDraft = draft;
+}
+
+function closeCharacterEditor() {
+  appState.messagesView = "list";
+  appState.characterEditorId = null;
+  appState.characterDraft = null;
+  appState.activeMessagesTab = "contacts";
 }
 
 function buildOpenAIInput(conversationId) {
@@ -773,13 +849,23 @@ function buildOpenAIInput(conversationId) {
   if (profile.locationWeatherAwareness) {
     awareness.push(currentWeatherContext());
   }
+  if (profile.aiNickname) {
+    awareness.push(`The character refers to themself as "${profile.aiNickname}" when it feels natural.`);
+  }
+  const characterPrompt = profile.characterPrompt || profile.worldbook || "";
+  const promptSections = [FIXED_CHARACTER_SYSTEM_PROMPT];
+  if (profile.useGlobalWordbook && persistedState.appSettings.globalWordbook?.trim()) {
+    promptSections.push(persistedState.appSettings.globalWordbook.trim());
+  }
+  promptSections.push(characterPrompt);
   const systemText =
-    `${profile.worldbook}\n\n` +
+    `${promptSections.filter(Boolean).join("\n\n")}\n\n` +
     `${awareness.join(" ")}\n\n` +
     `Remember up to ${memoryLimit} recent messages. ` +
     `${profile.intelligentMemoryManagement ? "Prefer emotionally salient and image-bearing moments when staying consistent." : ""} ` +
     `Message frequency: ${profile.messageFrequency}. ` +
     `Blocked state: ${profile.isBlocked ? "blocked" : "not blocked"}. ` +
+    `Display name: ${profile.name}. ` +
     `Speak as ${profile.name} in a soft, intimate WeChat style.`;
 
   const input = [
@@ -1291,7 +1377,7 @@ function summarizeApiError(error, responseText = "") {
 
 function buildTestInput(profile) {
   const systemText =
-    `${profile.worldbook || "You are a soft, affectionate AI character in a love-chat app."}\n\n` +
+    `${profile.characterPrompt || profile.worldbook || "You are a soft, affectionate AI character in a love-chat app."}\n\n` +
     `Reply in character, warmly and briefly, like a believable romantic chat partner.`;
 
   return [
@@ -1739,12 +1825,16 @@ function renderContactsTab() {
           )
           .join("")}
       </div>
+      <button type="button" class="contacts-add-button" data-action="create-character" aria-label="Create new character">
+        <span class="contacts-add-icon">+</span>
+        <span>Create Character</span>
+      </button>
       ${
         visibleProfiles.length
           ? visibleProfiles
               .map(
                 (profile) => `
-                  <section class="contact-card">
+                  <section class="contact-card contact-card--interactive" data-action="open-character-editor" data-profile-id="${profile.id}">
                     <div class="contact-card-avatar">
                       ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
                     </div>
@@ -1754,7 +1844,7 @@ function renderContactsTab() {
                         <span class="contact-tag">${profile.messageFrequency.toUpperCase()}</span>
                         ${profile.isBlocked ? '<span class="contact-tag">Blocked</span>' : '<span class="contact-tag">AI</span>'}
                       </div>
-                      <p>${profile.worldbook.slice(0, 74)}...</p>
+                      <p>${(profile.characterPrompt || profile.worldbook || "").slice(0, 74)}...</p>
                     </div>
                     <div class="contact-card-actions">
                       <button type="button" class="contact-icon-button" data-action="open-chat" data-conversation="${profile.id}" aria-label="Open chat">
@@ -1775,6 +1865,63 @@ function renderContactsTab() {
             </div>
           `
       }
+    </div>
+  `;
+}
+
+function renderCharacterEditorScreen() {
+  const profileId = currentCharacterEditorId();
+  const draft = appState.characterDraft || getProfile(profileId);
+
+  return `
+    <div class="messages-pane">
+      <div class="messages-header">
+        <button type="button" class="messages-back" data-action="close-character-editor" aria-label="Back to contacts">
+          ${iconSvg("back")}
+        </button>
+        <div class="messages-header-title">Character Editor</div>
+        <div class="messages-header-spacer"></div>
+      </div>
+
+      <section class="character-editor-hero">
+        <div class="character-editor-avatar">
+          ${imageMarkup(draft.avatar, `${draft.name} avatar`, "h-full w-full", "AV")}
+        </div>
+        <div class="character-editor-copy">
+          <h2>${draft.name}</h2>
+          <p>${draft.aiNickname || draft.name}</p>
+        </div>
+      </section>
+
+      <section class="character-editor-group">
+        <label class="chat-settings-stack-row">
+          <span class="chat-settings-row-title">Display Name</span>
+          <input type="text" class="chat-settings-text-input" data-role="character-display-name-input" value="${escapeAttribute(draft.name)}" />
+        </label>
+        <label class="chat-settings-stack-row">
+          <span class="chat-settings-row-title">AI Nickname</span>
+          <input type="text" class="chat-settings-text-input" data-role="character-ai-nickname-input" value="${escapeAttribute(draft.aiNickname || "")}" />
+        </label>
+      </section>
+
+      <section class="character-editor-group">
+        <label class="chat-settings-stack-row">
+          <span class="chat-settings-row-title">Character Prompt</span>
+          <span class="chat-settings-row-detail">Lore, tone, texting habits, and personality. Example: a grumpy cat who loves snacks.</span>
+          <textarea class="chat-settings-textarea character-editor-textarea" data-role="character-prompt-input">${draft.characterPrompt || draft.worldbook || ""}</textarea>
+        </label>
+      </section>
+
+      <section class="character-editor-group">
+        ${renderToggleField("Enable Specific Global Wordbook", "character-global-wordbook-toggle", !!draft.useGlobalWordbook, persistedState.appSettings.globalWordbook?.trim() ? "This character will also follow the Global Wordbook from AI Settings." : "Add a Global Wordbook in AI Settings to use this.")}
+      </section>
+
+      <div class="character-editor-fixed-note">
+        <h3>Hidden Fixed Prompt</h3>
+        <p>The app always prepends a private texting-style system instruction before the global wordbook, this character prompt, chat memory, and your new message.</p>
+      </div>
+
+      <button type="button" class="character-save-button" data-action="save-character">Save Character</button>
     </div>
   `;
 }
@@ -1934,6 +2081,20 @@ function renderCentralSettingsScreen() {
                   </select>
                 </label>
                 ${renderToggleField("Google AI Studio Mode", "google-mode-toggle", draft.googleAiStudioMode, "Uses Gemini's native v1beta generateContent route with x-goog-api-key.")}
+              </div>
+            </section>
+
+            <section class="central-settings-section">
+              <div class="chat-settings-section-header">
+                ${settingsSectionIcon("memory")}
+                <h3>Global Wordbook</h3>
+              </div>
+              <div class="chat-settings-card">
+                <label class="chat-settings-stack-row">
+                  <span class="chat-settings-row-title">Shared Wordbook</span>
+                  <span class="chat-settings-row-detail">Characters with the Global Wordbook toggle on will receive this before their own character prompt.</span>
+                  <textarea class="chat-settings-textarea" data-role="global-wordbook-input">${persistedState.appSettings.globalWordbook || ""}</textarea>
+                </label>
               </div>
             </section>
 
@@ -2181,8 +2342,8 @@ function renderChatSettingsScreen(conversationId) {
               ${renderToggleField("Intelligent Memory Management", "memory-management-toggle", profile.intelligentMemoryManagement, "Keep important emotional and image moments more stable.")}
               <label class="chat-settings-stack-row">
                 <span class="chat-settings-row-title">Link Worldbook</span>
-                <span class="chat-settings-row-detail">${profile.worldbook.slice(0, 100)}${profile.worldbook.length > 100 ? "..." : ""}</span>
-                <textarea class="chat-settings-textarea" data-role="worldbook-input">${profile.worldbook}</textarea>
+                <span class="chat-settings-row-detail">${(profile.characterPrompt || profile.worldbook).slice(0, 100)}${(profile.characterPrompt || profile.worldbook).length > 100 ? "..." : ""}</span>
+                <textarea class="chat-settings-textarea" data-role="worldbook-input">${profile.characterPrompt || profile.worldbook}</textarea>
               </label>
             </div>
           </section>
@@ -2424,6 +2585,10 @@ function renderMessagesBody() {
     return renderChatScreen();
   }
 
+  if (appState.messagesView === "character-editor" && appState.characterEditorId) {
+    return renderCharacterEditorScreen();
+  }
+
   const tabs = {
     chats: renderChatsTab,
     contacts: renderContactsTab,
@@ -2441,7 +2606,7 @@ function renderMessagesScreen() {
         ${renderStatusBar()}
         <div class="messages-app ${appState.messagesView === "chat" ? "messages-app--chat" : ""}">
           ${renderMessagesBody()}
-          ${appState.messagesView === "chat" ? "" : renderMessagesTabBar()}
+          ${appState.messagesView === "chat" || appState.messagesView === "character-editor" ? "" : renderMessagesTabBar()}
         </div>
       </div>
     </div>
@@ -2520,6 +2685,7 @@ function mountSettingsInputs(root) {
   const apiUrlInput = root.querySelector("[data-role='api-url-input']");
   const corsProxyInput = root.querySelector("[data-role='cors-proxy-input']");
   const apiModelSelect = root.querySelector("[data-role='api-model-select']");
+  const globalWordbookInput = root.querySelector("[data-role='global-wordbook-input']");
   const worldbookInput = root.querySelector("[data-role='worldbook-input']");
   const memoryCountInput = root.querySelector("[data-role='memory-count-input']");
   const memoryManagementToggle = root.querySelector("[data-role='memory-management-toggle']");
@@ -2531,6 +2697,10 @@ function mountSettingsInputs(root) {
   const momentsFrequencySelect = root.querySelector("[data-role='moments-frequency-select']");
   const blockToggle = root.querySelector("[data-role='block-toggle']");
   const nicknameInput = root.querySelector("[data-role='nickname-input']");
+  const characterDisplayNameInput = root.querySelector("[data-role='character-display-name-input']");
+  const characterAiNicknameInput = root.querySelector("[data-role='character-ai-nickname-input']");
+  const characterPromptInput = root.querySelector("[data-role='character-prompt-input']");
+  const characterGlobalWordbookToggle = root.querySelector("[data-role='character-global-wordbook-toggle']");
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
 
   if (activeApiProfileSelect) {
@@ -2599,6 +2769,13 @@ function mountSettingsInputs(root) {
     });
   }
 
+  if (globalWordbookInput) {
+    globalWordbookInput.addEventListener("input", (event) => {
+      persistedState.appSettings.globalWordbook = event.target.value;
+      saveChatState();
+    });
+  }
+
   if (corsProxyInput) {
     corsProxyInput.addEventListener("input", (event) => {
       ensureApiDraft();
@@ -2624,7 +2801,7 @@ function mountSettingsInputs(root) {
 
   if (worldbookInput) {
     worldbookInput.addEventListener("input", (event) => {
-      updateProfile(currentConversationId(), { worldbook: event.target.value });
+      updateProfile(currentConversationId(), { worldbook: event.target.value, characterPrompt: event.target.value });
     });
   }
 
@@ -2674,6 +2851,42 @@ function mountSettingsInputs(root) {
   if (nicknameInput) {
     nicknameInput.addEventListener("input", (event) => {
       updateProfile(currentConversationId(), { nicknameForUser: event.target.value });
+    });
+  }
+
+  if (characterDisplayNameInput) {
+    characterDisplayNameInput.addEventListener("input", (event) => {
+      appState.characterDraft = {
+        ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
+        name: event.target.value,
+      };
+    });
+  }
+
+  if (characterAiNicknameInput) {
+    characterAiNicknameInput.addEventListener("input", (event) => {
+      appState.characterDraft = {
+        ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
+        aiNickname: event.target.value,
+      };
+    });
+  }
+
+  if (characterPromptInput) {
+    characterPromptInput.addEventListener("input", (event) => {
+      appState.characterDraft = {
+        ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
+        characterPrompt: event.target.value,
+      };
+    });
+  }
+
+  if (characterGlobalWordbookToggle) {
+    characterGlobalWordbookToggle.addEventListener("change", (event) => {
+      appState.characterDraft = {
+        ...(appState.characterDraft || getProfile(currentCharacterEditorId())),
+        useGlobalWordbook: event.target.checked,
+      };
     });
   }
 
@@ -2810,6 +3023,8 @@ function handleAction(action, button) {
     appState.activeMessagesTab = button.dataset.tab || "chats";
     appState.messagesView = "list";
     appState.activeConversationId = null;
+    appState.characterEditorId = null;
+    appState.characterDraft = null;
     appState.chatView = "conversation";
     appState.attachmentMenuOpen = false;
     render();
@@ -2828,6 +3043,24 @@ function handleAction(action, button) {
 
   if (action === "open-chat") {
     openConversation(button.dataset.conversation || "angel-bunny");
+    render();
+    return;
+  }
+
+  if (action === "open-character-editor") {
+    openCharacterEditor(button.dataset.profileId || "angel-bunny");
+    render();
+    return;
+  }
+
+  if (action === "create-character") {
+    createCharacterEditor();
+    render();
+    return;
+  }
+
+  if (action === "close-character-editor") {
+    closeCharacterEditor();
     render();
     return;
   }
@@ -2893,6 +3126,25 @@ function handleAction(action, button) {
     const conversationId = currentConversationId();
     setConversation(conversationId, []);
     appState.isReplyPending = false;
+    render();
+    return;
+  }
+
+  if (action === "save-character") {
+    const profileId = currentCharacterEditorId();
+    const draft = appState.characterDraft || getProfile(profileId);
+    const existing = getProfile(profileId) || {};
+    updateProfile(profileId, {
+      id: profileId,
+      name: draft.name || existing.name || "New Character",
+      aiNickname: draft.aiNickname || draft.name || existing.name || "New Character",
+      characterPrompt: draft.characterPrompt || "",
+      worldbook: draft.characterPrompt || draft.worldbook || "",
+      useGlobalWordbook: !!draft.useGlobalWordbook,
+      isVisible: true,
+    });
+    ensureConversation(profileId);
+    closeCharacterEditor();
     render();
     return;
   }
@@ -2978,6 +3230,13 @@ function wireInteractions(root) {
 
       if (appId === "messages") {
         enterMessagesScreen();
+        render();
+        return;
+      }
+
+      if (appId === "contacts") {
+        enterMessagesScreen();
+        appState.activeMessagesTab = "contacts";
         render();
         return;
       }
