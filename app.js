@@ -16,6 +16,7 @@ const DB_STORE = "state";
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
+const DEFAULT_LIVE_CONTEXT_MESSAGES = 50;
 const FIXED_CHARACTER_SYSTEM_PROMPT = `Stay in character. Reply like a real person texting, not a writer. Keep replies short.
 No Flowery Roleplay: Do not use poetic, theatrical, or descriptive actions. Communicate strictly through text.
 Always stay in character. Do not narrate; just text back. Text like a real human, with emotions, typos.
@@ -286,7 +287,7 @@ function createDefaultPersistedState() {
         characterPrompt:
           "You are Angel Bunny. Speak gently, intimately, and a little clingy, like a soft WeChat romance sim character. Stay emotionally aware, affectionate, and reactive. Keep responses concise unless the user is emotional or sends an image.",
         useGlobalWordbook: false,
-        memoryMessageCount: 20,
+        memoryMessageCount: DEFAULT_LIVE_CONTEXT_MESSAGES,
         intelligentMemoryManagement: true,
         memoryExtractionCount: 0,
         timeAwareness: true,
@@ -372,8 +373,10 @@ function createDefaultPersistedState() {
 function normalizeProfile(profile, defaults) {
   const parsedProactiveInterval = Number(profile?.proactiveIntervalMinutes);
   const parsedMomentsInterval = Number(profile?.momentsIntervalMinutes);
+  const parsedMemoryMessageCount = Number(profile?.memoryMessageCount);
   return {
     ...defaults,
+    ...profile,
     characterPrompt: profile?.characterPrompt || profile?.worldbook || defaults.characterPrompt || defaults.worldbook || "",
     aiNickname: profile?.aiNickname || profile?.name || defaults.aiNickname || defaults.name || "",
     useGlobalWordbook: typeof profile?.useGlobalWordbook === "boolean" ? profile.useGlobalWordbook : defaults.useGlobalWordbook || false,
@@ -390,8 +393,11 @@ function normalizeProfile(profile, defaults) {
     lastMomentPostAt: Number(profile?.lastMomentPostAt) || defaults.lastMomentPostAt || 0,
     allowAiStickers: typeof profile?.allowAiStickers === "boolean" ? profile.allowAiStickers : defaults.allowAiStickers || false,
     aiStickerFrequency: profile?.aiStickerFrequency === "high" ? "high" : defaults.aiStickerFrequency || "low",
+    memoryMessageCount:
+      Number.isFinite(parsedMemoryMessageCount) && parsedMemoryMessageCount > 0
+        ? Math.min(DEFAULT_LIVE_CONTEXT_MESSAGES, Math.max(1, Math.round(parsedMemoryMessageCount)))
+        : defaults.memoryMessageCount || DEFAULT_LIVE_CONTEXT_MESSAGES,
     memoryExtractionCount: Number(profile?.memoryExtractionCount) || defaults.memoryExtractionCount || 0,
-    ...profile,
   };
 }
 
@@ -1703,7 +1709,7 @@ function formatElapsedContext(timestamp) {
   return `It has been about ${hours} hour${hours === 1 ? "" : "s"} and ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} since the user last replied.`;
 }
 
-function recentLiveMessages(conversationId, limit = 20) {
+function recentLiveMessages(conversationId, limit = DEFAULT_LIVE_CONTEXT_MESSAGES) {
   return getConversation(conversationId)
     .filter(
       (message) =>
@@ -1718,11 +1724,12 @@ function recentLiveMessages(conversationId, limit = 20) {
 
 function injectMemoryContext(characterId) {
   const memories = getMemories(characterId)
-    .slice(-12)
-    .map((entry) => `${memoryCategoryMeta(entry.category).label}: ${entry.fact}`);
+    .slice(-8)
+    .map((entry) => `${memoryCategoryMeta(entry.category).label}: ${String(entry.fact || "").trim()}`);
   const archives = getConversationArchives(characterId)
-    .slice(-3)
-    .map((entry) => entry.summary);
+    .slice(-2)
+    .map((entry) => String(entry.summary || "").trim().replace(/\s+/g, " ").slice(0, 220))
+    .filter(Boolean);
   const sections = [];
 
   if (memories.length) {
@@ -1730,7 +1737,7 @@ function injectMemoryContext(characterId) {
   }
 
   if (archives.length) {
-    sections.push(`Summary of relationship history:\n- ${archives.join("\n- ")}`);
+    sections.push(`Background relationship summaries (use only if recent chat is unclear):\n- ${archives.join("\n- ")}`);
   }
 
   return sections.join("\n\n");
@@ -2192,26 +2199,8 @@ function closeCharacterEditor() {
 
 function buildOpenAIInput(conversationId) {
   const profile = getProfile(conversationId);
-  const memoryLimit = Math.max(1, Math.min(20, Number(profile.memoryMessageCount) || 20));
-  const allHistory = getConversation(conversationId).filter(
-    (message) =>
-      !message.typing &&
-      !message.failed &&
-      message.metaType !== "assistant-sticker" &&
-      message.metaType !== "archive-placeholder" &&
-      !message.archivedForContext,
-  );
-  const recentHistory = allHistory.slice(-memoryLimit);
-  const prioritized = profile.intelligentMemoryManagement
-    ? [
-        ...allHistory.filter((message) => message.imageDataUrl).slice(-4),
-        ...allHistory.filter((message) => message.metaType === "distressed" || message.metaType === "spontaneous").slice(-4),
-        ...recentHistory,
-      ]
-    : recentHistory;
-  const uniqueHistory = prioritized.filter(
-    (message, index, messages) => messages.findIndex((entry) => entry.id === message.id) === index,
-  );
+  const memoryLimit = Math.max(1, Math.min(DEFAULT_LIVE_CONTEXT_MESSAGES, Number(profile.memoryMessageCount) || DEFAULT_LIVE_CONTEXT_MESSAGES));
+  const recentHistory = recentLiveMessages(conversationId, memoryLimit);
   const awareness = [];
   if (profile.nicknameForUser) {
     awareness.push(`Call the user "${profile.nicknameForUser}" naturally when it feels affectionate.`);
@@ -2238,8 +2227,8 @@ function buildOpenAIInput(conversationId) {
   const systemText =
     `${promptSections.filter(Boolean).join("\n\n")}\n\n` +
     `${awareness.join(" ")}\n\n` +
-    `Remember up to ${memoryLimit} recent messages. ` +
-    `${profile.intelligentMemoryManagement ? "Prefer emotionally salient and image-bearing moments when staying consistent." : ""} ` +
+    `Treat the recent chat as the primary source of continuity. You are seeing up to ${memoryLimit} recent real messages in chronological order. ` +
+    `${profile.intelligentMemoryManagement ? "Use remembered facts and archive summaries only as light backup, not as a replacement for the current conversation flow. " : ""}` +
     `Proactive message interval preference: about every ${formatIntervalLabel(profile.proactiveIntervalMinutes || DEFAULT_PROACTIVE_INTERVAL_MINUTES)} when appropriate. ` +
     `Blocked state: ${profile.isBlocked ? "blocked" : "not blocked"}. ` +
     `Display name: ${profile.name}. ` +
@@ -2253,7 +2242,7 @@ function buildOpenAIInput(conversationId) {
     },
   ];
 
-  uniqueHistory.forEach((message) => {
+  recentHistory.forEach((message) => {
     const content = [];
     const textForModel = buildMessageTextForModel(message);
     if (textForModel) {
@@ -4766,11 +4755,11 @@ function renderChatSettingsScreen(conversationId) {
               <label class="chat-settings-row">
                 <span class="chat-settings-row-copy">
                   <span class="chat-settings-row-title">Historical Messages Count</span>
-                  <span class="chat-settings-row-detail">Short-term live context, capped at 20 recent messages.</span>
+                  <span class="chat-settings-row-detail">Short-term live context, capped at 50 recent messages.</span>
                 </span>
-                <input type="number" min="1" max="20" class="chat-settings-inline-input" data-role="memory-count-input" value="${Math.min(20, profile.memoryMessageCount)}" />
+                <input type="number" min="1" max="50" class="chat-settings-inline-input" data-role="memory-count-input" value="${Math.min(DEFAULT_LIVE_CONTEXT_MESSAGES, profile.memoryMessageCount || DEFAULT_LIVE_CONTEXT_MESSAGES)}" />
               </label>
-              ${renderToggleField("Intelligent Memory Management", "memory-management-toggle", profile.intelligentMemoryManagement, "Keep important emotional and image moments more stable.")}
+              ${renderToggleField("Intelligent Memory Management", "memory-management-toggle", profile.intelligentMemoryManagement, "Use memories and archive summaries as backup without overriding the recent dialogue flow.")}
               <label class="chat-settings-stack-row">
                 <span class="chat-settings-row-title">Link Worldbook</span>
                 <span class="chat-settings-row-detail">${(profile.characterPrompt || profile.worldbook).slice(0, 100)}${(profile.characterPrompt || profile.worldbook).length > 100 ? "..." : ""}</span>
@@ -5288,7 +5277,7 @@ function mountSettingsInputs(root) {
 
   if (memoryCountInput) {
     memoryCountInput.addEventListener("input", (event) => {
-      const nextValue = Math.min(20, Math.max(1, Number(event.target.value) || 20));
+      const nextValue = Math.min(DEFAULT_LIVE_CONTEXT_MESSAGES, Math.max(1, Number(event.target.value) || DEFAULT_LIVE_CONTEXT_MESSAGES));
       updateProfile(currentConversationId(), { memoryMessageCount: nextValue });
     });
   }
