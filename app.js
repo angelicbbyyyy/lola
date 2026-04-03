@@ -2609,7 +2609,7 @@ async function requestInstagramFeedPosts() {
   ]);
 
   const parsed = extractJsonValueCandidate(result);
-  return Array.isArray(parsed) ? parsed : [];
+  return normalizeInstagramFeedItems(parsed);
 }
 
 async function requestInstagramComments(post) {
@@ -2636,13 +2636,7 @@ async function requestInstagramComments(post) {
   ]);
 
   const parsed = extractJsonValueCandidate(result);
-  if (parsed && typeof parsed === "object" && Array.isArray(parsed.comments)) {
-    return parsed;
-  }
-  if (Array.isArray(parsed)) {
-    return { likes: "", comments: parsed };
-  }
-  return { likes: "", comments: [] };
+  return normalizeInstagramCommentPayload(parsed);
 }
 
 async function requestInstagramStrangerRequests() {
@@ -5454,6 +5448,100 @@ function formatInstagramCount(value) {
   return `${Number(value) || 0}`;
 }
 
+function normalizeInstagramFeedItems(parsed) {
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return [];
+  }
+  if (Array.isArray(parsed.posts)) {
+    return parsed.posts;
+  }
+  if (Array.isArray(parsed.feed)) {
+    return parsed.feed;
+  }
+  if (Array.isArray(parsed.items)) {
+    return parsed.items;
+  }
+  if (Array.isArray(parsed.data)) {
+    return parsed.data;
+  }
+  return [];
+}
+
+function fallbackInstagramFeedPosts() {
+  const seeds = [
+    {
+      user: "karennne",
+      imageDescription: "A blurry golden-hour mirror selfie with messy curls and a coffee cup on the sink.",
+      caption: "lowkey this lighting saved me today 🤭",
+    },
+    {
+      user: "martini_rond",
+      imageDescription: "A grainy street shot of scooters, storefront signs, and rain on the pavement.",
+      caption: "city looked kinda cinematic for no reason 💀",
+    },
+    {
+      user: "kiero_d",
+      imageDescription: "A desk setup with silver headphones, a sketchbook, and a half-finished logo on screen.",
+      caption: "pretending i am not redoing the same layout again lol",
+    },
+    {
+      user: "jamie.franco",
+      imageDescription: "A soft beach sunset with sandals in the sand and a tote bag half in frame.",
+      caption: "mentally i am still here btw 🤍",
+    },
+    {
+      user: "m_humphrey",
+      imageDescription: "A restaurant table covered in little plates, fizzy drinks, and one flash photo.",
+      caption: "we said quick dinner and then ordered everything 😭",
+    },
+  ];
+  return seeds.map((entry, index) => ({ ...entry, id: `fallback-feed-${index}` }));
+}
+
+function normalizeInstagramCommentPayload(parsed) {
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.comments)) {
+    return parsed;
+  }
+  if (Array.isArray(parsed)) {
+    return { likes: "", comments: parsed };
+  }
+  if (parsed && typeof parsed === "object") {
+    if (Array.isArray(parsed.replies)) {
+      return { likes: parsed.likes || "", comments: parsed.replies };
+    }
+    if (Array.isArray(parsed.data)) {
+      return { likes: parsed.likes || "", comments: parsed.data };
+    }
+  }
+  return { likes: "", comments: [] };
+}
+
+function fallbackInstagramComments(post) {
+  const characters = instagramFriendUsernames();
+  const character = characters[0];
+  const comments = [
+    { username: "karennne", text: "wait this is actually so pretty ?? 🤩" },
+    { username: "martini_rond", text: "ok mood i see you" },
+    { username: "m_humphrey", text: "the vibe here is kind of everything 💅" },
+    { username: "jamie.franco", text: "obsessed w this one ngl" },
+  ];
+  if (character) {
+    comments.unshift({
+      username: character.username,
+      text: `i knew you'd post something like this. very you, in a good way`,
+    });
+  } else {
+    comments.unshift({ username: "closefriends.jpg", text: `ok wait this eats a little` });
+  }
+  return {
+    likes: `${Math.floor(Math.random() * 80 + 20)}k`,
+    comments: comments.map((entry, index) => ({ ...entry, id: `fallback-comment-${post.id}-${index}` })),
+  };
+}
+
 function getInstagramPost(postId) {
   return getInstagramPosts().find((post) => post.id === postId) || null;
 }
@@ -5938,19 +6026,21 @@ async function generateInstagramFeed() {
   appState.instagramStatusMessage = "Generating feed...";
   render();
   try {
-    const generated = await requestInstagramFeedPosts();
+    let generated = await requestInstagramFeedPosts();
     if (!generated.length) {
-      appState.instagramStatusMessage = "The feed generator returned nothing. Try again.";
-      return;
+      generated = fallbackInstagramFeedPosts();
+      appState.instagramStatusMessage = "The AI feed was empty, so Lola filled the feed with fallback posts.";
+    } else {
+      appState.instagramStatusMessage = "Feed generated.";
     }
     saveSimulatedFeedContent(
       generated.slice(0, 5).map((item, index) => ({
         user: String(item.user || `friend_${index + 1}`).trim(),
         imageDescription: String(item.imageDescription || "A simulated photo").trim(),
         caption: String(item.caption || "").trim(),
+        likes: item.likes || "",
       })),
     );
-    appState.instagramStatusMessage = "Feed generated.";
   } catch (error) {
     appState.instagramStatusMessage = summarizeApiError(error) || "Unable to generate the feed.";
   } finally {
@@ -5971,7 +6061,13 @@ async function generateInstagramComments(postId) {
   appState.instagramStatusMessage = "Generating comments...";
   render();
   try {
-    const generated = await requestInstagramComments(post);
+    let generated = await requestInstagramComments(post);
+    if (!(generated.comments || []).length) {
+      generated = fallbackInstagramComments(post);
+      appState.instagramStatusMessage = "The AI comments came back empty, so Lola filled in fallback comments.";
+    } else {
+      appState.instagramStatusMessage = "Comments generated.";
+    }
     const characters = instagramFriendUsernames();
     updateInstagramPost(postId, (entry) => ({
       ...entry,
@@ -5991,7 +6087,6 @@ async function generateInstagramComments(postId) {
         };
       }),
     }));
-    appState.instagramStatusMessage = "Comments generated.";
   } catch (error) {
     appState.instagramStatusMessage = summarizeApiError(error) || "Unable to generate comments.";
   } finally {
