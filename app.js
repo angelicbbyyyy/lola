@@ -3758,7 +3758,7 @@ function renderMessagesHeader(title) {
 
 function renderChatsTab() {
   const visibleProfiles = Object.values(persistedState.characterProfiles).filter(
-    (profile) => profile.isVisible && getConversation(profile.id).some((message) => !message.typing),
+    (profile) => profile.isVisible && Object.prototype.hasOwnProperty.call(persistedState.conversations, profile.id),
   );
 
   const rows = visibleProfiles.map((profile) => {
