@@ -1,6 +1,8 @@
 const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
 const SIMULATION_INTERVAL_MS = 30_000;
+const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
+const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
 const FIXED_CHARACTER_SYSTEM_PROMPT = `You must strictly adhere to the following personality traits, lore, and texting habits to sound like a real person sending texts, not an AI writing a novel.
 
 NEVER use perfect, formal capitalization.
@@ -32,6 +34,8 @@ const appState = {
   },
   showApiKey: false,
 };
+
+const automationLocks = new Set();
 
 const homeConfig = {
   status: {
@@ -243,11 +247,16 @@ function createDefaultPersistedState() {
         locationWeatherAwareness: false,
         proactiveMessaging: true,
         messageFrequency: "medium",
+        proactiveIntervalMinutes: DEFAULT_PROACTIVE_INTERVAL_MINUTES,
         momentsPosting: true,
         momentsFrequency: "low",
+        momentsIntervalMinutes: DEFAULT_MOMENTS_INTERVAL_MINUTES,
         isBlocked: false,
         chatWallpaper: "",
         nicknameForUser: "",
+        lastUserMessageAt: 0,
+        lastCharacterMessageAt: 0,
+        lastMomentPostAt: 0,
         isVisible: true,
       },
     },
@@ -274,11 +283,24 @@ function createDefaultPersistedState() {
 }
 
 function normalizeProfile(profile, defaults) {
+  const parsedProactiveInterval = Number(profile?.proactiveIntervalMinutes);
+  const parsedMomentsInterval = Number(profile?.momentsIntervalMinutes);
   return {
     ...defaults,
     characterPrompt: profile?.characterPrompt || profile?.worldbook || defaults.characterPrompt || defaults.worldbook || "",
     aiNickname: profile?.aiNickname || profile?.name || defaults.aiNickname || defaults.name || "",
     useGlobalWordbook: typeof profile?.useGlobalWordbook === "boolean" ? profile.useGlobalWordbook : defaults.useGlobalWordbook || false,
+    proactiveIntervalMinutes:
+      Number.isFinite(parsedProactiveInterval) && parsedProactiveInterval > 0
+        ? parsedProactiveInterval
+        : defaults.proactiveIntervalMinutes || DEFAULT_PROACTIVE_INTERVAL_MINUTES,
+    momentsIntervalMinutes:
+      Number.isFinite(parsedMomentsInterval) && parsedMomentsInterval > 0
+        ? parsedMomentsInterval
+        : defaults.momentsIntervalMinutes || DEFAULT_MOMENTS_INTERVAL_MINUTES,
+    lastUserMessageAt: Number(profile?.lastUserMessageAt) || defaults.lastUserMessageAt || 0,
+    lastCharacterMessageAt: Number(profile?.lastCharacterMessageAt) || defaults.lastCharacterMessageAt || 0,
+    lastMomentPostAt: Number(profile?.lastMomentPostAt) || defaults.lastMomentPostAt || 0,
     ...profile,
   };
 }
@@ -582,6 +604,7 @@ function createMessage({
   role,
   text,
   timestamp,
+  createdAt = Date.now(),
   status = "sent",
   failed = false,
   retrying = false,
@@ -597,6 +620,7 @@ function createMessage({
     role,
     text,
     timestamp,
+    createdAt,
     status,
     failed,
     retrying,
@@ -644,24 +668,22 @@ function currentChatStatus() {
   return profile?.status || "Online";
 }
 
-function frequencyChance(level) {
-  if (level === "high") {
-    return 0.14;
+function normalizeIntervalMinutes(value, fallbackMinutes) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return fallbackMinutes;
   }
-  if (level === "medium") {
-    return 0.08;
-  }
-  return 0.04;
+  return Math.max(1, Math.min(24 * 60, Math.round(numericValue)));
 }
 
-function frequencyLabel(level) {
-  if (level === "high") {
-    return "High";
+function formatIntervalLabel(minutes) {
+  const safeMinutes = normalizeIntervalMinutes(minutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES);
+  if (safeMinutes < 60) {
+    return `${safeMinutes} min`;
   }
-  if (level === "medium") {
-    return "Medium";
-  }
-  return "Low (1-2 hours)";
+  const hours = Math.floor(safeMinutes / 60);
+  const remainder = safeMinutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
 function currentAwarenessSummary(profile) {
@@ -696,6 +718,24 @@ function currentTimeContext() {
 
 function currentWeatherContext() {
   return "Location & weather are simulated as a soft, cloudy day with calm indoor light.";
+}
+
+function formatElapsedContext(timestamp) {
+  const value = Number(timestamp) || 0;
+  if (!value) {
+    return "You have not heard from the user in a while.";
+  }
+
+  const diffMinutes = Math.max(1, Math.round((Date.now() - value) / 60000));
+  if (diffMinutes < 60) {
+    return `It has been about ${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} since the user last replied.`;
+  }
+  const hours = Math.floor(diffMinutes / 60);
+  const remainingMinutes = diffMinutes % 60;
+  if (!remainingMinutes) {
+    return `It has been about ${hours} hour${hours === 1 ? "" : "s"} since the user last replied.`;
+  }
+  return `It has been about ${hours} hour${hours === 1 ? "" : "s"} and ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} since the user last replied.`;
 }
 
 function clearConversationTimers() {
@@ -751,6 +791,17 @@ function addTypingMessage(conversationId) {
 
 function appendMessage(conversationId, message) {
   updateConversation(conversationId, (messages) => [...messages, message]);
+  const profile = getProfile(conversationId);
+  if (!profile || message.typing) {
+    return;
+  }
+  if (message.role === "user") {
+    updateProfile(conversationId, { lastUserMessageAt: message.createdAt || Date.now() });
+    return;
+  }
+  if (message.role === "ai") {
+    updateProfile(conversationId, { lastCharacterMessageAt: message.createdAt || Date.now() });
+  }
 }
 
 function updateMessage(conversationId, messageId, updater) {
@@ -867,7 +918,7 @@ function buildOpenAIInput(conversationId) {
     `${awareness.join(" ")}\n\n` +
     `Remember up to ${memoryLimit} recent messages. ` +
     `${profile.intelligentMemoryManagement ? "Prefer emotionally salient and image-bearing moments when staying consistent." : ""} ` +
-    `Message frequency: ${profile.messageFrequency}. ` +
+    `Proactive message interval preference: about every ${formatIntervalLabel(profile.proactiveIntervalMinutes || DEFAULT_PROACTIVE_INTERVAL_MINUTES)} when appropriate. ` +
     `Blocked state: ${profile.isBlocked ? "blocked" : "not blocked"}. ` +
     `Display name: ${profile.name}. ` +
     `Speak as ${profile.name} in a soft, intimate WeChat style.`;
@@ -899,9 +950,59 @@ function buildOpenAIInput(conversationId) {
   return input;
 }
 
+function buildAutomationInput(conversationId, mode) {
+  const input = buildOpenAIInput(conversationId);
+  const profile = getProfile(conversationId);
+  const baseInstruction =
+    mode === "moment"
+      ? [
+          "Create a very short in-character Moments post.",
+          "It should read like something this character would post on a social feed, not a reply to the user.",
+          "Keep it to 1 or 2 short lines, intimate and human.",
+          "Do not use hashtags, stage directions, or formal writing.",
+          profile.timeAwareness ? `Use the current time context naturally: ${currentTimeContext()}.` : "",
+        ]
+      : [
+          "Send one proactive in-character message to the user.",
+          "This is not a reply. You are reaching out first because time passed and you noticed their silence.",
+          formatElapsedContext(profile.lastUserMessageAt),
+          profile.timeAwareness ? `Use the local time naturally: ${currentTimeContext()}.` : "",
+          "Keep it to 1 or 2 short text-message lines.",
+          "Do not explain that you are an AI or mention prompts.",
+        ];
+
+  return [
+    ...input,
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: baseInstruction.filter(Boolean).join(" "),
+        },
+      ],
+    },
+  ];
+}
+
 async function callOpenAI(conversationId) {
   const activeApiProfile = getActiveApiProfile();
   return executeProfileRequest(activeApiProfile, conversationId);
+}
+
+function canUseActiveApiProfile() {
+  const activeApiProfile = getActiveApiProfile();
+  return !!(activeApiProfile?.apiKey && activeApiProfile?.apiUrl);
+}
+
+async function requestGeneratedProactiveMessage(conversationId) {
+  const activeApiProfile = getActiveApiProfile();
+  return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "proactive"));
+}
+
+async function requestGeneratedMomentPost(conversationId) {
+  const activeApiProfile = getActiveApiProfile();
+  return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "moment"));
 }
 
 function receiveMessage(conversationId, responseText) {
@@ -1020,6 +1121,7 @@ function resendRequest(messageId) {
 }
 
 function createMomentPost(characterId, text, generated = true) {
+  updateProfile(characterId, { lastMomentPostAt: Date.now() });
   persistedState.momentsPosts = [
     {
       id: `moment-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -1566,10 +1668,12 @@ async function fetchModelsForDraft() {
   render();
 }
 
-function maybeSimulateCharacterActivity() {
-  Object.values(persistedState.characterProfiles).forEach((profile) => {
+async function maybeSimulateCharacterActivity() {
+  const now = Date.now();
+
+  for (const profile of Object.values(persistedState.characterProfiles)) {
     if (!profile.isVisible) {
-      return;
+      continue;
     }
 
     if (profile.isBlocked) {
@@ -1588,45 +1692,63 @@ function maybeSimulateCharacterActivity() {
           render();
         }
       }
-      return;
+      continue;
     }
 
-    if (!profile.proactiveMessaging) {
-      return;
+    const proactiveIntervalMs = normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES) * 60 * 1000;
+    const momentsIntervalMs = normalizeIntervalMinutes(profile.momentsIntervalMinutes, DEFAULT_MOMENTS_INTERVAL_MINUTES) * 60 * 1000;
+    const lastUserAt = Number(profile.lastUserMessageAt) || 0;
+    const lastCharacterAt = Number(profile.lastCharacterMessageAt) || 0;
+    const lastMomentAt = Number(profile.lastMomentPostAt) || 0;
+    const lastConversationActivityAt = Math.max(lastUserAt, lastCharacterAt) || now;
+    const shouldPing =
+      profile.proactiveMessaging &&
+      canUseActiveApiProfile() &&
+      now - lastConversationActivityAt >= proactiveIntervalMs;
+    const shouldPostMoment =
+      profile.momentsPosting &&
+      canUseActiveApiProfile() &&
+      now - (lastMomentAt || now) >= momentsIntervalMs;
+
+    if (shouldPing && !automationLocks.has(`proactive:${profile.id}`)) {
+      automationLocks.add(`proactive:${profile.id}`);
+      try {
+        const proactiveText = await requestGeneratedProactiveMessage(profile.id);
+        appendMessage(
+          profile.id,
+          createMessage({
+            role: "ai",
+            text: proactiveText,
+            timestamp: formatLocalTime(),
+            status: "delivered",
+            metaType: "spontaneous",
+          }),
+        );
+        if (appState.activeConversationId === profile.id && appState.messagesView === "chat") {
+          render();
+        }
+      } catch (_error) {
+        // Silent retry on next interval; user-facing failures stay in direct chat sends only.
+      } finally {
+        automationLocks.delete(`proactive:${profile.id}`);
+      }
     }
 
-    const isActiveChat = appState.activeScreen === "messages" && appState.messagesView === "chat" && appState.activeConversationId === profile.id;
-    if (!isActiveChat || appState.isReplyPending) {
-      if (profile.momentsPosting && Math.random() <= frequencyChance(profile.momentsFrequency || "low") * 0.3) {
-        const bucket = messagesConfig.generatedMoments[profile.momentsFrequency] || messagesConfig.generatedMoments.low;
-        createMomentPost(profile.id, bucket[Math.floor(Math.random() * bucket.length)]);
+    if (shouldPostMoment && !automationLocks.has(`moment:${profile.id}`)) {
+      automationLocks.add(`moment:${profile.id}`);
+      try {
+        const momentText = await requestGeneratedMomentPost(profile.id);
+        createMomentPost(profile.id, momentText);
         if (appState.activeMessagesTab === "moments" && appState.activeScreen === "messages") {
           render();
         }
+      } catch (_error) {
+        // Silent retry on next interval.
+      } finally {
+        automationLocks.delete(`moment:${profile.id}`);
       }
-      return;
     }
-
-    if (Math.random() <= frequencyChance(profile.messageFrequency)) {
-      const bucket = messagesConfig.spontaneousMessages[profile.messageFrequency] || messagesConfig.spontaneousMessages.medium;
-      appendMessage(
-        profile.id,
-        createMessage({
-          role: "ai",
-          text: bucket[Math.floor(Math.random() * bucket.length)],
-          timestamp: formatLocalTime(),
-          status: "delivered",
-          metaType: "spontaneous",
-        }),
-      );
-      render();
-    }
-
-    if (profile.momentsPosting && Math.random() <= frequencyChance(profile.momentsFrequency || "low") * 0.35) {
-      const bucket = messagesConfig.generatedMoments[profile.momentsFrequency] || messagesConfig.generatedMoments.low;
-      createMomentPost(profile.id, bucket[Math.floor(Math.random() * bucket.length)]);
-    }
-  });
+  }
 }
 
 function startSimulationLoop() {
@@ -1634,6 +1756,7 @@ function startSimulationLoop() {
     window.clearInterval(simulationLoopId);
   }
 
+  maybeSimulateCharacterActivity();
   simulationLoopId = window.setInterval(maybeSimulateCharacterActivity, SIMULATION_INTERVAL_MS);
 }
 
@@ -1846,11 +1969,11 @@ function renderContactsTab() {
                         ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
                       </div>
                       <div class="contact-card-copy">
-                        <div class="contact-card-title-row">
-                          <h3>${profile.name}</h3>
-                          <span class="contact-tag">${profile.messageFrequency.toUpperCase()}</span>
-                          ${profile.isBlocked ? '<span class="contact-tag">Blocked</span>' : '<span class="contact-tag">AI</span>'}
-                        </div>
+                      <div class="contact-card-title-row">
+                        <h3>${profile.name}</h3>
+                        <span class="contact-tag">${formatIntervalLabel(profile.proactiveIntervalMinutes || DEFAULT_PROACTIVE_INTERVAL_MINUTES)}</span>
+                        ${profile.isBlocked ? '<span class="contact-tag">Blocked</span>' : '<span class="contact-tag">AI</span>'}
+                      </div>
                       </div>
                       <div class="contact-card-actions">
                         <button type="button" class="contact-icon-button" data-action="open-chat" data-conversation="${profile.id}" aria-label="Open chat">
@@ -2384,26 +2507,18 @@ function renderChatSettingsScreen(conversationId) {
               ${renderToggleField("Character Proactively Messages Me", "proactive-toggle", profile.proactiveMessaging, "Lets the character reach out first on its own.")}
               <label class="chat-settings-row">
                 <span class="chat-settings-row-copy">
-                  <span class="chat-settings-row-title">Messaging Frequency</span>
-                  <span class="chat-settings-row-detail">${frequencyLabel(profile.messageFrequency)}</span>
+                  <span class="chat-settings-row-title">Messaging Interval</span>
+                  <span class="chat-settings-row-detail">Trigger a proactive AI message every ${formatIntervalLabel(profile.proactiveIntervalMinutes)} if enough time has passed.</span>
                 </span>
-                <select class="chat-settings-inline-select" data-role="frequency-select">
-                  <option value="low" ${profile.messageFrequency === "low" ? "selected" : ""}>Low (1-2 hours)</option>
-                  <option value="medium" ${profile.messageFrequency === "medium" ? "selected" : ""}>Medium</option>
-                  <option value="high" ${profile.messageFrequency === "high" ? "selected" : ""}>High</option>
-                </select>
+                <input type="number" min="1" max="1440" class="chat-settings-inline-input" data-role="proactive-interval-input" value="${normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES)}" />
               </label>
               ${renderToggleField("Character Posts to Moments", "moments-toggle", profile.momentsPosting, "Creates real auto-posts in the Moments tab.")}
               <label class="chat-settings-row">
                 <span class="chat-settings-row-copy">
-                  <span class="chat-settings-row-title">Moments Posting Frequency</span>
-                  <span class="chat-settings-row-detail">${frequencyLabel(profile.momentsFrequency || "low")}</span>
+                  <span class="chat-settings-row-title">Moments Posting Interval</span>
+                  <span class="chat-settings-row-detail">Create an AI-written Moments post every ${formatIntervalLabel(profile.momentsIntervalMinutes)}.</span>
                 </span>
-                <select class="chat-settings-inline-select" data-role="moments-frequency-select">
-                  <option value="low" ${(profile.momentsFrequency || "low") === "low" ? "selected" : ""}>Low (1-2 hours)</option>
-                  <option value="medium" ${profile.momentsFrequency === "medium" ? "selected" : ""}>Medium</option>
-                  <option value="high" ${profile.momentsFrequency === "high" ? "selected" : ""}>High</option>
-                </select>
+                <input type="number" min="1" max="1440" class="chat-settings-inline-input" data-role="moments-interval-input" value="${normalizeIntervalMinutes(profile.momentsIntervalMinutes, DEFAULT_MOMENTS_INTERVAL_MINUTES)}" />
               </label>
             </div>
           </section>
@@ -2752,9 +2867,9 @@ function mountSettingsInputs(root) {
   const timeAwarenessToggle = root.querySelector("[data-role='time-awareness-toggle']");
   const weatherAwarenessToggle = root.querySelector("[data-role='weather-awareness-toggle']");
   const proactiveToggle = root.querySelector("[data-role='proactive-toggle']");
-  const frequencySelect = root.querySelector("[data-role='frequency-select']");
+  const proactiveIntervalInput = root.querySelector("[data-role='proactive-interval-input']");
   const momentsToggle = root.querySelector("[data-role='moments-toggle']");
-  const momentsFrequencySelect = root.querySelector("[data-role='moments-frequency-select']");
+  const momentsIntervalInput = root.querySelector("[data-role='moments-interval-input']");
   const blockToggle = root.querySelector("[data-role='block-toggle']");
   const nicknameInput = root.querySelector("[data-role='nickname-input']");
   const characterDisplayNameInput = root.querySelector("[data-role='character-display-name-input']");
@@ -2883,9 +2998,13 @@ function mountSettingsInputs(root) {
     });
   }
 
-  if (frequencySelect) {
-    frequencySelect.addEventListener("change", (event) => {
-      updateProfile(currentConversationId(), { messageFrequency: event.target.value });
+  if (proactiveIntervalInput) {
+    proactiveIntervalInput.addEventListener("input", (event) => {
+      const nextValue = normalizeIntervalMinutes(event.target.value, DEFAULT_PROACTIVE_INTERVAL_MINUTES);
+      updateProfile(currentConversationId(), {
+        proactiveIntervalMinutes: nextValue,
+        messageFrequency: `${nextValue}m`,
+      });
     });
   }
 
@@ -2895,9 +3014,13 @@ function mountSettingsInputs(root) {
     });
   }
 
-  if (momentsFrequencySelect) {
-    momentsFrequencySelect.addEventListener("change", (event) => {
-      updateProfile(currentConversationId(), { momentsFrequency: event.target.value });
+  if (momentsIntervalInput) {
+    momentsIntervalInput.addEventListener("input", (event) => {
+      const nextValue = normalizeIntervalMinutes(event.target.value, DEFAULT_MOMENTS_INTERVAL_MINUTES);
+      updateProfile(currentConversationId(), {
+        momentsIntervalMinutes: nextValue,
+        momentsFrequency: `${nextValue}m`,
+      });
     });
   }
 
@@ -3388,6 +3511,11 @@ function init() {
   render();
   scheduleStatusClock();
   startSimulationLoop();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      maybeSimulateCharacterActivity();
+    }
+  });
 }
 
 init();
