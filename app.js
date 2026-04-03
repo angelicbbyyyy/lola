@@ -5428,19 +5428,6 @@ function instagramIconSvg(name) {
   return icons[name] || "";
 }
 
-function renderInstagramStatusBar() {
-  return `
-    <header class="instagram-statusbar">
-      <div id="status-time" class="status-time reference-mode">--:--</div>
-      <div class="instagram-status-icons">
-        <div class="instagram-status-icon">${imageMarkup(homeConfig.status.signalImage, "Mobile signal", "h-full w-full object-contain", "SIG")}</div>
-        <div class="instagram-status-icon">${imageMarkup(homeConfig.status.wifiImage, "Wi-Fi", "h-full w-full object-contain", "WF")}</div>
-        <div class="instagram-status-battery">${imageMarkup(homeConfig.status.batteryImage, "Battery", "h-full w-full object-contain", "BAT")}</div>
-      </div>
-    </header>
-  `;
-}
-
 function instagramStoryItems() {
   const profile = getInstagramProfile();
   const characters = visibleCharacterProfiles().slice(0, 4);
@@ -5915,7 +5902,7 @@ function renderInstagramScreen() {
   return `
     <div class="phone-shell phone-shell--instagram">
       <div class="shell-inner shell-inner--instagram">
-        ${renderInstagramStatusBar()}
+        ${renderStatusBar()}
         <div class="instagram-app">
           <input type="file" accept="image/*" multiple hidden data-role="instagram-post-upload-input" />
           <input type="file" accept="image/*" hidden data-role="instagram-avatar-input" />
@@ -7674,10 +7661,6 @@ function render() {
   if (!rootNode) {
     return;
   }
-
-  const instagramActive = appState.activeScreen === "instagram";
-  document.body.classList.toggle("instagram-active", instagramActive);
-  document.getElementById("app-shell")?.classList.toggle("app-shell--instagram", instagramActive);
 
   rootNode.innerHTML = renderApp();
   mountImageFallbacks(rootNode);

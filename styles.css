@@ -30,16 +30,6 @@ body {
   color: var(--shell-text);
 }
 
-body.instagram-active {
-  background: #ffffff;
-  color: #111111;
-}
-
-#app-shell.app-shell--instagram {
-  max-width: none;
-  width: 100%;
-}
-
 button,
 input {
   font: inherit;
@@ -2581,32 +2571,6 @@ button {
   color: #111111;
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 15px;
-}
-
-.instagram-statusbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: calc(env(safe-area-inset-top, 0px) + 6px) 16px 8px;
-  background: #ffffff;
-  color: #111111;
-  border-bottom: 1px solid #f3f3f3;
-}
-
-.instagram-status-icons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.instagram-status-icon {
-  width: 18px;
-  height: 12px;
-}
-
-.instagram-status-battery {
-  width: 24px;
-  height: 14px;
 }
 
 .instagram-screen-body {
