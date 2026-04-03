@@ -1320,8 +1320,9 @@ function buildMessageTextForModel(message) {
     parts.push(`Quoted earlier message for context: "${message.quotedMessageText}"`);
   }
   if (message.stickerName || message.stickerDescription) {
+    const actorLabel = message.role === "ai" ? "You sent a sticker" : "The user sent a sticker";
     parts.push(
-      `The user sent a sticker instead of text. Sticker name: ${message.stickerName || "Unnamed sticker"}. Mood/description: ${message.stickerDescription || "No description provided"}. React to it naturally like a real chat message.`,
+      `${actorLabel} instead of text. Sticker name: ${message.stickerName || "Unnamed sticker"}. Mood/description: ${message.stickerDescription || "No description provided"}. Treat it as part of the conversation naturally.`,
     );
   }
   if (message.text) {
