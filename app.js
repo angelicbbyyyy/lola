@@ -3,6 +3,12 @@ const STORAGE_KEY = "lola_chat_engine_v1";
 const STORAGE_BACKUP_KEY = "lola_chat_engine_v1_backup";
 const STORAGE_SNAPSHOT_INDEX_KEY = "lola_chat_engine_v1_snapshots";
 const STORAGE_SNAPSHOT_PREFIX = "lola_chat_engine_v1_snapshot_";
+const STORAGE_COLLECTION_KEYS = {
+  conversations: "lola_chat_engine_v1_conversations",
+  stickerPacks: "lola_chat_engine_v1_sticker_packs",
+  memories: "lola_chat_engine_v1_memories",
+  conversationArchives: "lola_chat_engine_v1_archives",
+};
 const SIMULATION_INTERVAL_MS = 30_000;
 const DEFAULT_PROACTIVE_INTERVAL_MINUTES = 120;
 const DEFAULT_MOMENTS_INTERVAL_MINUTES = 180;
@@ -370,6 +376,31 @@ function writeSnapshotIndex(keys) {
   window.localStorage.setItem(STORAGE_SNAPSHOT_INDEX_KEY, JSON.stringify(keys));
 }
 
+function readCollectionMirror(key) {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(key));
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  return {
+    updatedAt: Number(parsed.updatedAt) || 0,
+    payload: parsed.payload,
+  };
+}
+
+function writeCollectionMirrors(state) {
+  const timestamp = Number(state?.updatedAt) || Date.now();
+  Object.entries(STORAGE_COLLECTION_KEYS).forEach(([field, key]) => {
+    const payload = state?.[field];
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        updatedAt: timestamp,
+        payload,
+      }),
+    );
+  });
+}
+
 function latestTimestampFromItems(items) {
   if (!Array.isArray(items) || !items.length) {
     return 0;
@@ -542,6 +573,28 @@ function normalizePersistedSnapshot(defaults, parsed) {
   };
 }
 
+function mergeStateWithCollectionMirrors(state, mirrors) {
+  const nextState = { ...state };
+
+  if (mirrors.conversations?.payload && typeof mirrors.conversations.payload === "object") {
+    nextState.conversations = mergeConversationMessageLists(mirrors.conversations.payload, nextState.conversations);
+  }
+
+  if (Array.isArray(mirrors.stickerPacks?.payload)) {
+    nextState.stickerPacks = pickFresherArray(mirrors.stickerPacks.payload, nextState.stickerPacks);
+  }
+
+  if (mirrors.memories?.payload && typeof mirrors.memories.payload === "object") {
+    nextState.memories = mergeKeyedArrays(mirrors.memories.payload, nextState.memories);
+  }
+
+  if (mirrors.conversationArchives?.payload && typeof mirrors.conversationArchives.payload === "object") {
+    nextState.conversationArchives = mergeKeyedArrays(mirrors.conversationArchives.payload, nextState.conversationArchives);
+  }
+
+  return nextState;
+}
+
 function loadChatState() {
   const defaults = createDefaultPersistedState();
 
@@ -552,6 +605,9 @@ function loadChatState() {
     const parsedSnapshots = snapshotKeys
       .map((key) => tryParseStoredJson(window.localStorage.getItem(key)))
       .filter(Boolean);
+    const collectionMirrors = Object.fromEntries(
+      Object.entries(STORAGE_COLLECTION_KEYS).map(([field, key]) => [field, readCollectionMirror(key)]),
+    );
     const parsedPrimary = tryParseStoredJson(rawPrimary);
     const parsedBackup = tryParseStoredJson(rawBackup);
 
@@ -565,7 +621,7 @@ function loadChatState() {
       }
       return mergeTwoRawSnapshots(accumulator, snapshot);
     }, null);
-    const state = normalizePersistedSnapshot(defaults, merged);
+    const state = mergeStateWithCollectionMirrors(normalizePersistedSnapshot(defaults, merged), collectionMirrors);
     if ((parsedPrimary && !rawBackup) || parsedSnapshots.length) {
       try {
         writeStoragePayload(JSON.stringify(state));
@@ -610,6 +666,15 @@ function deleteApiProfile(profileId) {
 }
 
 function writeStoragePayload(json) {
+  const parsed = tryParseStoredJson(json);
+  if (parsed) {
+    try {
+      writeCollectionMirrors(parsed);
+    } catch (_error) {
+      // Collection mirrors are best-effort.
+    }
+  }
+
   window.localStorage.setItem(STORAGE_KEY, json);
   try {
     window.localStorage.setItem(STORAGE_BACKUP_KEY, json);
@@ -618,7 +683,6 @@ function writeStoragePayload(json) {
   }
 
   try {
-    const parsed = tryParseStoredJson(json);
     const snapshotTimestamp = Number(parsed?.updatedAt) || Date.now();
     const snapshotKey = `${STORAGE_SNAPSHOT_PREFIX}${snapshotTimestamp}`;
     window.localStorage.setItem(snapshotKey, json);
