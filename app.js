@@ -2503,7 +2503,6 @@ async function executeProfileRequest(profile, sourceInput) {
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
       ],
-      generationConfig: { maxOutputTokens: 1024 },
     };
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     endpoint = `${baseUrl}/messages`;
