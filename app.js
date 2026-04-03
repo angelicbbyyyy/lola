@@ -970,6 +970,7 @@ function applyProviderPresetToProfile(profile, preset) {
       requestFormat: "google-native",
       googleAiStudioMode: true,
       apiUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: /gemini/i.test(profile.model) ? profile.model : "gemini-2.0-flash",
     };
   }
 
@@ -1216,6 +1217,17 @@ function extractAssistantText(data, profile) {
     return textParts.join("\n\n").trim();
   }
 
+  if (profile.providerPreset === "google" || data.candidates) {
+    const candidate = data.candidates?.[0];
+    if (candidate?.finishReason === "SAFETY") {
+      throw new Error("The model declined to respond due to safety filters. Try rephrasing your message.");
+    }
+    if (candidate?.content?.parts) {
+      return candidate.content.parts.map((p) => p.text || "").join("").trim();
+    }
+    return "";
+  }
+
   if (typeof data.output_text === "string" && data.output_text.trim()) {
     return data.output_text.trim();
   }
@@ -1307,9 +1319,18 @@ async function executeProfileRequest(profile, sourceInput) {
   let requestBody = {};
 
   if (profile.providerPreset === "google") {
-    const model = normalizeGoogleModelName(profile.model || "gemini-1.5-pro");
+    const model = normalizeGoogleModelName(profile.model || "gemini-2.0-flash");
     endpoint = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
-    requestBody = buildGoogleCompatibleMessages(sourceInput);
+    requestBody = {
+      ...buildGoogleCompatibleMessages(sourceInput),
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+      ],
+      generationConfig: { maxOutputTokens: 1024 },
+    };
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     endpoint = `${baseUrl}/messages`;
     requestBody = {
@@ -2561,6 +2582,7 @@ function mountSettingsInputs(root) {
             providerPreset: "google",
             requestFormat: "google-native",
             apiUrl: "https://generativelanguage.googleapis.com/v1beta",
+            model: /gemini/i.test(nextDraft.model) ? nextDraft.model : "gemini-2.0-flash",
           }
         : nextDraft;
       render();
