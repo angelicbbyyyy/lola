@@ -372,7 +372,7 @@ button {
   display: grid;
   grid-template-columns: 50px 1fr auto;
   gap: 12px;
-  min-height: 58px;
+  min-height: 64px;
   align-items: center;
   padding: 10px 16px;
 }
@@ -411,15 +411,16 @@ button {
 }
 
 .chat-name {
+  margin-bottom: 2px;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.25;
 }
 
-.contact-card-copy p {
+.chat-preview {
   overflow: hidden;
   color: #8e8e93;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -430,7 +431,9 @@ button {
   min-width: 46px;
   flex-direction: column;
   align-items: flex-end;
-  gap: 10px;
+  justify-content: space-between;
+  align-self: stretch;
+  padding: 10px 0;
 }
 
 .chat-time {

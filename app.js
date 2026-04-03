@@ -1768,9 +1768,10 @@ function renderChatsTab() {
         </div>
         <div class="chat-copy">
           <div class="chat-name">${profile.name}</div>
+          <div class="chat-preview">${messagePreview(lastMessage) || profile.subtitle || "Start the conversation…"}</div>
         </div>
         <div class="chat-meta">
-          <div class="chat-time">${lastMessage?.timestamp || profile.subtitle}</div>
+          <div class="chat-time">${lastMessage?.timestamp || ""}</div>
           <button type="button" class="chat-delete" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete sample conversation">
             ${iconSvg("delete")}
           </button>
