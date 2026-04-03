@@ -2545,11 +2545,19 @@ button {
 }
 
 .phone-shell--instagram {
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
   background: #ffffff;
+  background-image: none;
   color: #111111;
+  overflow: hidden;
 }
 
 .shell-inner--instagram {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding: 0;
   background: #ffffff;
 }
@@ -2557,7 +2565,8 @@ button {
 .instagram-app {
   display: flex;
   flex-direction: column;
-  min-height: calc(100% - 38px);
+  flex: 1;
+  min-height: 0;
   background: #ffffff;
   color: #111111;
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -2567,7 +2576,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px 6px;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 6px;
   background: #ffffff;
   color: #111111;
   font-weight: 600;
@@ -2595,6 +2604,7 @@ button {
   min-height: 0;
   overflow-y: auto;
   background: #ffffff;
+  width: 100%;
 }
 
 .instagram-topbar,
@@ -2696,7 +2706,7 @@ button {
 }
 
 .instagram-feed-list {
-  padding-bottom: 76px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 60px);
 }
 
 .instagram-feed-card {
@@ -2854,7 +2864,7 @@ button {
 }
 
 .instagram-profile-screen {
-  padding-bottom: 76px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 60px);
 }
 
 .instagram-topbar--profile {
@@ -3202,7 +3212,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  height: 50px;
+  min-height: 50px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   border-top: 1px solid #efefef;
   background: #ffffff;
 }
