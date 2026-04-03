@@ -1094,6 +1094,10 @@ button {
   pointer-events: none;
 }
 
+.chat-surface.has-wallpaper {
+  border-radius: 0;
+}
+
 .chat-surface.has-wallpaper::before {
   display: none;
 }
