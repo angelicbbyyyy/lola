@@ -2795,7 +2795,9 @@ function renderMessagesHeader(title) {
 }
 
 function renderChatsTab() {
-  const visibleProfiles = Object.values(persistedState.characterProfiles).filter((profile) => profile.isVisible);
+  const visibleProfiles = Object.values(persistedState.characterProfiles).filter(
+    (profile) => profile.isVisible && getConversation(profile.id).some((message) => !message.typing),
+  );
 
   const rows = visibleProfiles.map((profile) => {
     const lastMessage = latestVisibleMessage(profile.id);
@@ -4651,7 +4653,23 @@ function handleAction(action, button) {
 
   if (action === "delete-sample") {
     const profileId = button.dataset.profileId || currentConversationId();
+    const profile = getProfile(profileId);
+    const shouldDelete = window.confirm(
+      `Delete ${profile?.name || "this character"}? This will remove the character from Contacts and also delete their chat memories and archive summaries.`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
     updateProfile(profileId, { isVisible: false });
+    persistedState.memories = {
+      ...(persistedState.memories || {}),
+      [profileId]: [],
+    };
+    persistedState.conversationArchives = {
+      ...(persistedState.conversationArchives || {}),
+      [profileId]: [],
+    };
+    saveChatState();
     if (appState.activeConversationId === profileId) {
       closeConversation();
     }
@@ -4662,9 +4680,17 @@ function handleAction(action, button) {
   if (action === "clear-chat") {
     const profileId = button.dataset.profileId;
     if (profileId) {
+      const profile = getProfile(profileId);
+      const shouldDelete = window.confirm(
+        `Delete the chat with ${profile?.name || "this character"} from the Chats list? This removes the current thread from local storage.`,
+      );
+      if (!shouldDelete) {
+        return;
+      }
       setConversation(profileId, []);
       if (appState.activeConversationId === profileId) {
         appState.isReplyPending = false;
+        closeConversation();
       }
     }
     render();
