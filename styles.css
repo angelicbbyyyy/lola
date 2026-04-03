@@ -1533,6 +1533,12 @@ button {
   max-width: calc(100% - 64px);
 }
 
+.message-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .message-stack--user {
   display: flex;
   flex-direction: column;
@@ -1568,6 +1574,23 @@ button {
 
 .message-bubble--ai {
   background: #ffffff;
+}
+
+.message-bubble--cluster {
+  box-shadow: 0 8px 22px rgba(79, 79, 79, 0.05);
+}
+
+.message-bubble--cluster.is-first:not(.is-last) {
+  border-bottom-left-radius: 22px;
+}
+
+.message-bubble--cluster.is-last:not(.is-first) {
+  border-top-left-radius: 22px;
+}
+
+.message-bubble--cluster:not(.is-first):not(.is-last) {
+  border-top-left-radius: 22px;
+  border-bottom-left-radius: 22px;
 }
 
 .message-bubble--user {

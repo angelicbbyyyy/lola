@@ -10,7 +10,8 @@ NEVER use perfect, formal capitalization.
 Short, Punchy Messages (STRICT LIMIT): Send your replies as short text messages. LIMIT yourself to sending only 1 to 3 text lines per turn.
 
 No Flowery Roleplay: Do not use poetic, theatrical, or descriptive actions. Communicate strictly through text.
-Always stay in character. Do not narrate; just text back. Text like a real human, with emotions, typos.`;
+Always stay in character. Do not narrate; just text back. Text like a real human, with emotions, typos.
+When you have multiple thoughts or a longer reply, separate each distinct sentence or thought with the exact tag [BREAK]. Do not use new lines for this behavior; only use the [BREAK] tag.`;
 
 const appState = {
   activeScreen: "home",
@@ -958,6 +959,8 @@ function createMessage({
   stickerName = "",
   stickerDescription = "",
   stickerPackId = "",
+  bubbleParts = [],
+  revealedBubbleCount = 0,
 }) {
   return {
     id: nextMessageId(),
@@ -983,6 +986,8 @@ function createMessage({
     stickerName,
     stickerDescription,
     stickerPackId,
+    bubbleParts,
+    revealedBubbleCount,
   };
 }
 
@@ -1670,9 +1675,31 @@ function buildMessageTextForModel(message) {
     );
   }
   if (message.text) {
-    parts.push(message.text);
+    parts.push(String(message.text).replace(/\s*\[BREAK\]\s*/g, "\n\n"));
   }
   return parts.filter(Boolean).join("\n\n").trim();
+}
+
+function processAIResponse(rawText) {
+  const cleaned = String(rawText || "")
+    .replace(/\r/g, "")
+    .trim();
+  const bubbleParts = cleaned
+    .split(/\s*\[BREAK\]\s*/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!bubbleParts.length && cleaned) {
+    return {
+      text: cleaned,
+      bubbleParts: [cleaned],
+    };
+  }
+
+  return {
+    text: bubbleParts.join(" ").trim(),
+    bubbleParts,
+  };
 }
 
 function buildAutomationInput(conversationId, mode) {
@@ -1799,17 +1826,45 @@ function shouldAllowMomentsPost(profile, now) {
 }
 
 function receiveMessage(conversationId, responseText) {
-  appendMessage(
-    conversationId,
-    createMessage({
-      role: "ai",
-      text: responseText,
-      timestamp: formatLocalTime(),
-      status: "delivered",
-      metaType: "assistant",
-    }),
-  );
-  appendAiStickerForReply(conversationId, responseText);
+  const processed = processAIResponse(responseText);
+  const aiMessage = createMessage({
+    role: "ai",
+    text: processed.text,
+    timestamp: formatLocalTime(),
+    status: "delivered",
+    metaType: "assistant",
+    bubbleParts: processed.bubbleParts,
+    revealedBubbleCount: processed.bubbleParts.length ? 1 : 0,
+  });
+
+  appendMessage(conversationId, aiMessage);
+  const remainingParts = Math.max(0, processed.bubbleParts.length - 1);
+
+  if (!remainingParts) {
+    appendAiStickerForReply(conversationId, processed.text);
+    return;
+  }
+
+  for (let index = 0; index < remainingParts; index += 1) {
+    const typingTimer = window.setTimeout(() => {
+      addTypingMessage(conversationId);
+      render();
+    }, index * 1250 + 220);
+    appState.conversationTimers.push(typingTimer);
+
+    const revealTimer = window.setTimeout(() => {
+      removeTypingMessage(conversationId);
+      updateMessage(conversationId, aiMessage.id, (message) => ({
+        ...message,
+        revealedBubbleCount: Math.min((message.revealedBubbleCount || 1) + 1, processed.bubbleParts.length),
+      }));
+      if (index === remainingParts - 1) {
+        appendAiStickerForReply(conversationId, processed.text);
+      }
+      render();
+    }, index * 1250 + 1080 + Math.floor(Math.random() * 320));
+    appState.conversationTimers.push(revealTimer);
+  }
 }
 
 function scheduleMemoryMaintenance(conversationId) {
@@ -3347,6 +3402,25 @@ function renderMessage(conversationId, message) {
   const favoriteBadge = !isUser
     ? `<button type="button" class="message-favorite-badge ${isFavorited ? "is-active" : ""}" data-action="toggle-favorite-message" data-message-id="${message.id}" aria-label="${isFavorited ? "Unfavorite message" : "Favorite message"}">${iconSvg("star")}</button>`
     : "";
+  const visibleBubbleParts = !isUser
+    ? (Array.isArray(message.bubbleParts) && message.bubbleParts.length ? message.bubbleParts : message.text ? [message.text] : []).slice(
+        0,
+        message.revealedBubbleCount || (Array.isArray(message.bubbleParts) && message.bubbleParts.length ? message.bubbleParts.length : 1),
+      )
+    : [];
+  const aiBubbleCluster = !isUser
+    ? visibleBubbleParts
+        .map(
+          (part, index) => `
+            <div class="message-bubble message-bubble--ai message-bubble--cluster ${index === 0 ? "is-first" : ""} ${index === visibleBubbleParts.length - 1 ? "is-last" : ""}" data-message-bubble="${message.id}">
+              ${index === 0 ? quotedBlock : ""}
+              ${index === 0 ? imageBlock : ""}
+              <p>${part}</p>
+            </div>
+          `,
+        )
+        .join("")
+    : "";
 
   return `
     <div class="message-row ${isUser ? "message-row--user" : "message-row--ai"} ${message.deleting ? "is-deleting" : ""}">
@@ -3385,10 +3459,8 @@ function renderMessage(conversationId, message) {
                   ? renderStickerImageMessage(message)
                   : `
                     <div class="message-bubble-shell">
-                      <div class="message-bubble message-bubble--ai" data-message-bubble="${message.id}">
-                        ${quotedBlock}
-                        ${imageBlock}
-                        ${message.text ? `<p>${message.text}</p>` : ""}
+                      <div class="message-cluster">
+                        ${aiBubbleCluster || `<div class="message-bubble message-bubble--ai" data-message-bubble="${message.id}">${quotedBlock}${imageBlock}${message.text ? `<p>${message.text}</p>` : ""}</div>`}
                       </div>
                       ${favoriteBadge}
                     </div>
