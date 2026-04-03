@@ -1775,7 +1775,7 @@ function renderChatsTab() {
             <div class="chat-preview">${messagePreview(lastMessage) || profile.subtitle || "Start the conversation…"}</div>
           </div>
         </button>
-        <button type="button" class="chat-delete" data-action="delete-sample" data-profile-id="${profile.id}" aria-label="Delete">
+        <button type="button" class="chat-delete" data-action="clear-chat" data-profile-id="${profile.id}" aria-label="Clear chat">
           ${iconSvg("delete")}
         </button>
       </div>
@@ -2677,9 +2677,22 @@ function mountComposer(root) {
   };
 
   textarea.addEventListener("input", (event) => {
+    const prevDraft = appState.draftMessage || "";
     appState.draftMessage = event.target.value;
     syncHeight();
-    render();
+    // Only re-render when send button needs to appear/disappear
+    const wasEmpty = !prevDraft.trim() && !appState.pendingAttachment;
+    const isEmpty = !event.target.value.trim() && !appState.pendingAttachment;
+    if (wasEmpty !== isEmpty) {
+      const cursorPos = event.target.selectionStart;
+      render();
+      // Restore focus and cursor position after re-render
+      const newTextarea = root.querySelector("[data-role='composer-input']");
+      if (newTextarea) {
+        newTextarea.focus();
+        newTextarea.setSelectionRange(cursorPos, cursorPos);
+      }
+    }
   });
 
   textarea.addEventListener("keydown", (event) => {
@@ -3068,6 +3081,18 @@ function handleAction(action, button) {
     updateProfile(profileId, { isVisible: false });
     if (appState.activeConversationId === profileId) {
       closeConversation();
+    }
+    render();
+    return;
+  }
+
+  if (action === "clear-chat") {
+    const profileId = button.dataset.profileId;
+    if (profileId) {
+      setConversation(profileId, []);
+      if (appState.activeConversationId === profileId) {
+        appState.isReplyPending = false;
+      }
     }
     render();
     return;
