@@ -1283,6 +1283,7 @@ function buildOpenAIInput(conversationId) {
     `Proactive message interval preference: about every ${formatIntervalLabel(profile.proactiveIntervalMinutes || DEFAULT_PROACTIVE_INTERVAL_MINUTES)} when appropriate. ` +
     `Blocked state: ${profile.isBlocked ? "blocked" : "not blocked"}. ` +
     `Display name: ${profile.name}. ` +
+    `If the user sends a sticker, treat it as a real emotional message and respond naturally to the sticker's mood or meaning. ` +
     `Speak as ${profile.name} in a soft, intimate WeChat style.`;
 
   const input = [
@@ -1319,7 +1320,9 @@ function buildMessageTextForModel(message) {
     parts.push(`Quoted earlier message for context: "${message.quotedMessageText}"`);
   }
   if (message.stickerName || message.stickerDescription) {
-    parts.push(`Sticker sent: ${message.stickerName || "Unnamed sticker"}. Mood/description: ${message.stickerDescription || "No description provided"}.`);
+    parts.push(
+      `The user sent a sticker instead of text. Sticker name: ${message.stickerName || "Unnamed sticker"}. Mood/description: ${message.stickerDescription || "No description provided"}. React to it naturally like a real chat message.`,
+    );
   }
   if (message.text) {
     parts.push(message.text);
