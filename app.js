@@ -2,6 +2,10 @@ const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
 const STORAGE_BACKUP_KEY = "lola_chat_engine_v1_backup";
 const MOMENTS_DB_KEY = "moments_db";
+const INSTAGRAM_PROFILE_KEY = "instagram_profile";
+const INSTAGRAM_POSTS_KEY = "instagram_posts";
+const INSTAGRAM_FEED_KEY = "simulated_feed_content";
+const INSTAGRAM_DM_KEY = "instagram_dm_db";
 const STORAGE_SNAPSHOT_INDEX_KEY = "lola_chat_engine_v1_snapshots";
 const STORAGE_SNAPSHOT_PREFIX = "lola_chat_engine_v1_snapshot_";
 const STORAGE_COLLECTION_KEYS = {
@@ -63,6 +67,17 @@ const appState = {
   momentsDraftImages: [],
   momentsReplyTarget: null,
   momentsActionMenuOpen: false,
+  instagramTab: "home",
+  instagramView: "main",
+  instagramSelectedPostId: "",
+  instagramEditProfileOpen: false,
+  instagramDmThreadId: "",
+  instagramDmThreadType: "friend",
+  instagramDmDraft: "",
+  instagramSearchQuery: "",
+  instagramGeneratingFeed: false,
+  instagramGeneratingCommentsPostId: "",
+  instagramGeneratingStrangers: false,
 };
 
 const automationLocks = new Set();
@@ -78,6 +93,7 @@ const homeConfig = {
     { id: "messages", label: "Messages", icon: "messages.JPG" },
     { id: "settings", label: "Settings", icon: "settings.JPG" },
     { id: "memory", label: "Memory", icon: "memory.JPG" },
+    { id: "instagram", label: "Instagram", icon: "instagram.JPG" },
     { id: "music", label: "Music", icon: "music.JPG" },
     { id: "contacts", label: "Contacts", icon: "contacts.JPG" },
     { id: "twitter", label: "Twitter", icon: "twitter.JPG" },
@@ -1215,6 +1231,161 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function createDefaultInstagramProfile() {
+  return {
+    username: "jacob_w",
+    nickname: "Jacob West",
+    bio: "Digital goodies designer @pixsellz\nEverything is designed.",
+    postsCount: 2,
+    followers: "23.4k",
+    following: "318",
+    avatarDataUrl: "instagram friend profile.png",
+  };
+}
+
+function createDefaultInstagramPosts() {
+  return [
+    {
+      id: "ig-seed-main",
+      sourceType: "asset",
+      assetRef: "Instagram Main.png",
+      imageDataUrl: "",
+      contextLabel: "A photo of a chaotic Tokyo city crossing with glowing billboards and tall buildings.",
+      caption: "tokyo was loud in the best way today",
+      comments: [],
+      likes: 44686,
+      createdAt: Date.now() - 1000 * 60 * 60 * 18,
+    },
+    {
+      id: "ig-seed-profile",
+      sourceType: "asset",
+      assetRef: "instagram friend profile.png",
+      imageDataUrl: "",
+      contextLabel: "A warm portrait-style photo with soft tones and a cozy hat.",
+      caption: "kept this one because the light was kind",
+      comments: [],
+      likes: 3821,
+      createdAt: Date.now() - 1000 * 60 * 60 * 42,
+    },
+  ];
+}
+
+function createDefaultInstagramDmDb() {
+  return {
+    friends: {},
+    strangers: [],
+  };
+}
+
+function nextInstagramPostId() {
+  return `ig-post-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function nextInstagramCommentId() {
+  return `ig-comment-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function nextInstagramDmId() {
+  return `ig-dm-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function instagramPostImageSrc(post) {
+  return post?.imageDataUrl || post?.assetRef || "";
+}
+
+function getInstagramProfile() {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(INSTAGRAM_PROFILE_KEY));
+  const defaults = createDefaultInstagramProfile();
+  return {
+    ...defaults,
+    ...(parsed || {}),
+  };
+}
+
+function saveInstagramProfile(profile) {
+  window.localStorage.setItem(
+    INSTAGRAM_PROFILE_KEY,
+    JSON.stringify({
+      ...getInstagramProfile(),
+      ...(profile || {}),
+    }),
+  );
+}
+
+function getInstagramPosts() {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(INSTAGRAM_POSTS_KEY));
+  return Array.isArray(parsed) && parsed.length ? parsed : createDefaultInstagramPosts();
+}
+
+function saveInstagramPosts(posts) {
+  window.localStorage.setItem(INSTAGRAM_POSTS_KEY, JSON.stringify(Array.isArray(posts) ? posts : []));
+  const profile = getInstagramProfile();
+  saveInstagramProfile({
+    postsCount: Array.isArray(posts) ? posts.length : profile.postsCount,
+  });
+}
+
+function getSimulatedFeedContent() {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(INSTAGRAM_FEED_KEY));
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function saveSimulatedFeedContent(items) {
+  window.localStorage.setItem(INSTAGRAM_FEED_KEY, JSON.stringify(Array.isArray(items) ? items : []));
+}
+
+function normalizeInstagramFriendThreads(threads) {
+  const nextThreads = threads && typeof threads === "object" ? { ...threads } : {};
+  visibleCharacterProfiles().forEach((profile) => {
+    const mainConversation = getConversation(profile.id).filter((message) => !message.typing);
+    const latest = mainConversation[mainConversation.length - 1];
+    if (!nextThreads[profile.id]) {
+      nextThreads[profile.id] = {
+        id: profile.id,
+        username: profile.name.toLowerCase().replace(/\s+/g, "_"),
+        characterId: profile.id,
+        lastMessage: latest ? messagePreview(latest) : "Send a message",
+        updatedAt: latest?.createdAt || Date.now(),
+        messages: [],
+      };
+    }
+  });
+  return nextThreads;
+}
+
+function getInstagramDmDb() {
+  const parsed = tryParseStoredJson(window.localStorage.getItem(INSTAGRAM_DM_KEY));
+  const defaults = createDefaultInstagramDmDb();
+  return {
+    ...defaults,
+    ...(parsed || {}),
+    friends: normalizeInstagramFriendThreads(parsed?.friends),
+    strangers: Array.isArray(parsed?.strangers) ? parsed.strangers : [],
+  };
+}
+
+function saveInstagramDmDb(nextDb) {
+  const normalized = {
+    ...createDefaultInstagramDmDb(),
+    ...(nextDb || {}),
+  };
+  normalized.friends = normalizeInstagramFriendThreads(normalized.friends);
+  normalized.strangers = Array.isArray(normalized.strangers) ? normalized.strangers : [];
+  window.localStorage.setItem(INSTAGRAM_DM_KEY, JSON.stringify(normalized));
+}
+
+function enterInstagramApp() {
+  appState.activeScreen = "instagram";
+  appState.instagramTab = "home";
+  appState.instagramView = "main";
+  appState.instagramSelectedPostId = "";
+  appState.instagramEditProfileOpen = false;
+  appState.instagramDmThreadId = "";
+  appState.instagramDmThreadType = "friend";
+  appState.instagramDmDraft = "";
+  appState.instagramSearchQuery = "";
+}
+
 function getStickerPacks() {
   return Array.isArray(persistedState.stickerPacks) ? persistedState.stickerPacks : [];
 }
@@ -1759,6 +1930,35 @@ function extractJsonCandidate(text) {
     }
     try {
       return JSON.parse(match[0]);
+    } catch (_nestedError) {
+      return null;
+    }
+  }
+}
+
+function extractJsonValueCandidate(text) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned || /^null$/i.test(cleaned)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_error) {
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+      try {
+        return JSON.parse(arrayMatch[0]);
+      } catch (_arrayError) {
+        // fall through
+      }
+    }
+    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!objectMatch) {
+      return null;
+    }
+    try {
+      return JSON.parse(objectMatch[0]);
     } catch (_nestedError) {
       return null;
     }
@@ -2374,6 +2574,149 @@ async function requestGeneratedProactiveMessage(conversationId) {
 async function requestGeneratedMomentPost(conversationId) {
   const activeApiProfile = getActiveApiProfile();
   return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "moment"));
+}
+
+function instagramFriendUsernames() {
+  return visibleCharacterProfiles().map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    username: profile.name.toLowerCase().replace(/\s+/g, "_"),
+    prompt: profile.characterPrompt || profile.worldbook || "",
+  }));
+}
+
+async function requestInstagramFeedPosts() {
+  const activeApiProfile = getActiveApiProfile();
+  const prompt = [
+    "Generate 5 simulated Instagram home feed posts as strict JSON.",
+    'Return an array like [{"user":"string","imageDescription":"string","caption":"string"}].',
+    "Use trendy, gossipy, Gen Z caption energy with emojis, but keep it non-explicit.",
+    "Do not include markdown, code fences, or extra explanation.",
+  ].join(" ");
+
+  const result = await executeProfileRequest(activeApiProfile, [
+    {
+      role: "system",
+      content: [{ type: "input_text", text: "You generate realistic but safe Instagram simulation content." }],
+    },
+    {
+      role: "user",
+      content: [{ type: "input_text", text: prompt }],
+    },
+  ]);
+
+  const parsed = extractJsonValueCandidate(result);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function requestInstagramComments(post) {
+  const activeApiProfile = getActiveApiProfile();
+  const friends = instagramFriendUsernames();
+  const prompt = [
+    `Generate 5 realistic Instagram comments about this post: "${post.contextLabel || post.caption || "Post"}".`,
+    "Return strict JSON as an array of objects with keys username and text.",
+    `At least one username must come from this character list and stay in character: ${friends.map((entry) => `${entry.name} (@${entry.username}) - ${entry.prompt.slice(0, 90)}`).join("; ") || "none"}.`,
+    "Use Gen Z slang, trendy gossipy tone, and emojis like 💀, 🤩, and 💅 when natural.",
+    "Keep it safe and non-explicit.",
+    "No markdown or extra explanation.",
+  ].join(" ");
+
+  const result = await executeProfileRequest(activeApiProfile, [
+    {
+      role: "system",
+      content: [{ type: "input_text", text: "You generate believable Instagram comment sections as JSON only." }],
+    },
+    {
+      role: "user",
+      content: [{ type: "input_text", text: prompt }],
+    },
+  ]);
+
+  const parsed = extractJsonValueCandidate(result);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function requestInstagramStrangerRequests() {
+  const activeApiProfile = getActiveApiProfile();
+  const prompt = [
+    "Generate 10 simulated Instagram DM requests from stranger accounts as strict JSON.",
+    'Return an array like [{"user":"string","bio":"string","lastMessage":"string","requests":true,"unfiltered":true}].',
+    "Make them lifelike, provocative, flirty, gossipy, and mildly mature, but do not generate explicit sexual content.",
+    "No markdown or extra explanation.",
+  ].join(" ");
+
+  const result = await executeProfileRequest(activeApiProfile, [
+    {
+      role: "system",
+      content: [{ type: "input_text", text: "You generate safe but spicy-feeling Instagram DM request simulations as JSON only." }],
+    },
+    {
+      role: "user",
+      content: [{ type: "input_text", text: prompt }],
+    },
+  ]);
+
+  const parsed = extractJsonValueCandidate(result);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function requestInstagramFriendReply(characterId, threadMessages) {
+  const activeApiProfile = getActiveApiProfile();
+  const profile = getProfile(characterId);
+  const memoryInjection = injectMemoryContext(characterId);
+  const history = threadMessages.slice(-18).map((message) => ({
+    role: message.role === "friend" ? "assistant" : "user",
+    content: [{ type: "input_text", text: message.text }],
+  }));
+
+  return executeProfileRequest(activeApiProfile, [
+    {
+      role: "system",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            FIXED_CHARACTER_SYSTEM_PROMPT,
+            profile?.useGlobalWordbook && persistedState.appSettings.globalWordbook?.trim() ? persistedState.appSettings.globalWordbook.trim() : "",
+            profile?.characterPrompt || profile?.worldbook || "",
+            memoryInjection,
+            "This conversation is happening in Instagram DMs, not the main chat. Use casual, lowercase, short-punchy DM energy.",
+            "Do not sound formal. Keep it social and text-like.",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+      ],
+    },
+    ...history,
+  ]);
+}
+
+async function requestInstagramStrangerReply(thread) {
+  const activeApiProfile = getActiveApiProfile();
+  const history = (thread.messages || []).slice(-18).map((message) => ({
+    role: message.role === "stranger" ? "assistant" : "user",
+    content: [{ type: "input_text", text: message.text }],
+  }));
+
+  return executeProfileRequest(activeApiProfile, [
+    {
+      role: "system",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "Stay in character as this Instagram stranger persona.",
+            `Username: ${thread.username}.`,
+            `Bio/persona: ${thread.bio || "A random follower in the user's DMs."}`,
+            "This is an Instagram DM request thread. Be flirty, gossipy, casual, and mildly mature, but do not become explicit.",
+            "Keep replies short, text-like, and believable.",
+          ].join(" "),
+        },
+      ],
+    },
+    ...history,
+  ]);
 }
 
 function countUnansweredProactiveMessages(conversationId, now = Date.now()) {
@@ -5056,6 +5399,698 @@ function renderMessagesScreen() {
   `;
 }
 
+function instagramIconSvg(name) {
+  const icons = {
+    home: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5L12 4l8 6.5V20H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9.2 20v-5.6h5.6V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    search: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    reels: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4.5" width="14" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 4.8l2.2 3M12 4.8l2.2 3M16 4.8l2.2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M11 10l4 2.4-4 2.4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    shop: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12l-1.2 10H7.2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 10V8.5A3 3 0 0 1 12 5.5a3 3 0 0 1 3 3V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.8" y="3.8" width="16.4" height="16.4" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.7v8.6M7.7 12h8.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    direct: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 4L10.2 14.2M21 4l-7.4 17-3.4-7.2L3 10.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+    generate: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.7 4.3 4.3 1.7-4.3 1.7L12 15.5l-1.7-4.3L6 9.5l4.3-1.7zM18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9zM6 15.2l.7 1.6 1.6.7-1.6.7L6 19.8l-.7-1.6-1.6-.7 1.6-.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    menu: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>`,
+    comment: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 6.5h13a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-7l-4 2 .8-2A3 3 0 0 1 2.5 13.5v-4a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
+    heart: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.2l-1.2-1.1C6.1 14.8 3.5 12.5 3.5 9.2A4.2 4.2 0 0 1 7.8 5c1.7 0 3 .8 4.2 2.2C13.2 5.8 14.5 5 16.2 5a4.2 4.2 0 0 1 4.3 4.2c0 3.3-2.6 5.6-7.3 9.9L12 20.2z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+    send: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 4L10.2 14.2M21 4l-7.4 17-3.4-7.2L3 10.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+    save: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.8h12v15.4L12 16l-6 4.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
+    camera: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h2l1.2-2h3.6L15 7h2A2.5 2.5 0 0 1 19.5 9.5v7A2.5 2.5 0 0 1 17 19H7A2.5 2.5 0 0 1 4.5 16.5v-7A2.5 2.5 0 0 1 7 7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>`,
+  };
+
+  return icons[name] || "";
+}
+
+function renderInstagramStatusBar() {
+  return `
+    <header class="instagram-statusbar">
+      <div class="instagram-status-time">9:41</div>
+      <div class="instagram-status-icons">
+        <div class="instagram-status-icon">${imageMarkup(homeConfig.status.signalImage, "Mobile signal", "h-full w-full object-contain", "SIG")}</div>
+        <div class="instagram-status-icon">${imageMarkup(homeConfig.status.wifiImage, "Wi-Fi", "h-full w-full object-contain", "WF")}</div>
+        <div class="instagram-status-battery">${imageMarkup(homeConfig.status.batteryImage, "Battery", "h-full w-full object-contain", "BAT")}</div>
+      </div>
+    </header>
+  `;
+}
+
+function instagramStoryItems() {
+  const profile = getInstagramProfile();
+  const characters = visibleCharacterProfiles().slice(0, 4);
+  return [
+    { id: "me", label: "Your Story", avatar: profile.avatarDataUrl || "instagram friend profile.png", isUser: true },
+    ...characters.map((entry) => ({ id: entry.id, label: entry.name.toLowerCase().replace(/\s+/g, "_"), avatar: entry.avatar })),
+  ];
+}
+
+function formatInstagramRelativeTime(timestamp) {
+  const diffMinutes = Math.max(0, Math.round((Date.now() - Number(timestamp || Date.now())) / 60000));
+  if (diffMinutes < 1) return "now";
+  if (diffMinutes < 60) return `${diffMinutes}m`;
+  const hours = Math.floor(diffMinutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function formatInstagramCount(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  return `${Number(value) || 0}`;
+}
+
+function getInstagramPost(postId) {
+  return getInstagramPosts().find((post) => post.id === postId) || null;
+}
+
+function renderInstagramStories() {
+  return `
+    <div class="instagram-stories">
+      ${instagramStoryItems()
+        .map(
+          (story) => `
+            <div class="instagram-story">
+              <div class="instagram-story-ring ${story.isUser ? "is-user" : ""}">
+                <div class="instagram-story-avatar">${imageMarkup(story.avatar, `${story.label} avatar`, "h-full w-full", "IG")}</div>
+              </div>
+              <div class="instagram-story-label">${story.label}</div>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderInstagramFeedTab() {
+  const items = getSimulatedFeedContent();
+  return `
+    <div class="instagram-screen-body">
+      <div class="instagram-topbar">
+        <button type="button" class="instagram-icon-button" data-action="go-home" aria-label="Back to home">${instagramIconSvg("camera")}</button>
+        <div class="instagram-logo-wordmark">${imageMarkup("instagram logo.png", "Instagram", "h-full w-full object-contain", "IG")}</div>
+        <div class="instagram-topbar-actions">
+          <button type="button" class="instagram-icon-button" data-action="instagram-upload-post">${instagramIconSvg("plus")}</button>
+          <button type="button" class="instagram-icon-button ${appState.instagramGeneratingFeed ? "is-loading" : ""}" data-action="instagram-generate-feed">${instagramIconSvg("generate")}</button>
+          <button type="button" class="instagram-icon-button" data-action="instagram-open-dms">${instagramIconSvg("direct")}</button>
+        </div>
+      </div>
+      ${renderInstagramStories()}
+      <div class="instagram-feed-list">
+        ${
+          items.length
+            ? items
+                .map(
+                  (item, index) => `
+                    <article class="instagram-feed-card">
+                      <div class="instagram-feed-head">
+                        <div class="instagram-feed-user">
+                          <div class="instagram-feed-avatar">${imageMarkup("instagram friend profile.png", item.user, "h-full w-full", "IG")}</div>
+                          <div class="instagram-feed-identity">
+                            <div class="instagram-feed-username">${escapeHtml(item.user)}</div>
+                            <div class="instagram-feed-location">${index % 2 === 0 ? "Tokyo, Japan" : "Los Angeles, CA"}</div>
+                          </div>
+                        </div>
+                        <span class="instagram-feed-menu">${instagramIconSvg("menu")}</span>
+                      </div>
+                      <div class="instagram-feed-placeholder">${escapeHtml(item.imageDescription || "A simulated photo lives here.")}</div>
+                      <div class="instagram-feed-actions">
+                        <div class="instagram-feed-actions-left">
+                          <span>${instagramIconSvg("heart")}</span>
+                          <span>${instagramIconSvg("comment")}</span>
+                          <span>${instagramIconSvg("send")}</span>
+                        </div>
+                        <span>${instagramIconSvg("save")}</span>
+                      </div>
+                      <div class="instagram-feed-caption"><strong>${escapeHtml(item.user)}</strong> ${escapeHtml(item.caption || "")}</div>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<div class="instagram-empty-state"><h3>No feed posts yet</h3><p>Tap Generate to build a simulated Instagram home feed.</p></div>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderInstagramShellTab(title, body) {
+  return `
+    <div class="instagram-screen-body instagram-shell-body">
+      <div class="instagram-generic-header">
+        <div class="instagram-generic-title">${title}</div>
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+function renderInstagramProfileTab() {
+  const profile = getInstagramProfile();
+  const posts = [...getInstagramPosts()].sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+  return `
+    <div class="instagram-screen-body instagram-profile-screen">
+      <div class="instagram-topbar instagram-topbar--profile">
+        <div class="instagram-profile-handle">@${escapeHtml(profile.username)}</div>
+        <div class="instagram-topbar-actions">
+          <button type="button" class="instagram-icon-button" data-action="instagram-upload-post">${instagramIconSvg("plus")}</button>
+          <button type="button" class="instagram-icon-button">${instagramIconSvg("menu")}</button>
+        </div>
+      </div>
+      <div class="instagram-profile-summary">
+        <button type="button" class="instagram-profile-avatar" data-action="instagram-open-edit-profile">
+          ${imageMarkup(profile.avatarDataUrl, `${profile.nickname} avatar`, "h-full w-full", "IG")}
+        </button>
+        <div class="instagram-profile-metrics">
+          <div class="instagram-profile-metric"><strong>${formatInstagramCount(profile.postsCount)}</strong><span>posts</span></div>
+          <div class="instagram-profile-metric"><strong>${formatInstagramCount(profile.followers)}</strong><span>followers</span></div>
+          <div class="instagram-profile-metric"><strong>${formatInstagramCount(profile.following)}</strong><span>following</span></div>
+        </div>
+      </div>
+      <div class="instagram-profile-bio">
+        <h3>${escapeHtml(profile.nickname)}</h3>
+        <p>${escapeHtml(profile.bio).replace(/\n/g, "<br/>")}</p>
+      </div>
+      <button type="button" class="instagram-edit-profile-button" data-action="instagram-open-edit-profile">Edit Profile</button>
+      <div class="instagram-profile-grid">
+        ${posts
+          .map(
+            (post) => `
+              <button type="button" class="instagram-profile-grid-item" data-action="instagram-open-post" data-post-id="${post.id}">
+                <img src="${escapeAttribute(assetPath(instagramPostImageSrc(post)))}" alt="${escapeAttribute(post.contextLabel || "Instagram post")}" />
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      ${
+        appState.instagramEditProfileOpen
+          ? `
+            <div class="instagram-modal-backdrop">
+              <div class="instagram-edit-modal">
+                <div class="instagram-edit-header">
+                  <button type="button" class="instagram-modal-link" data-action="instagram-close-edit-profile">Cancel</button>
+                  <div class="instagram-edit-title">Edit Profile</div>
+                  <button type="button" class="instagram-modal-link instagram-modal-link--done" data-action="instagram-save-profile">Done</button>
+                </div>
+                <div class="instagram-edit-avatar-block">
+                  <button type="button" class="instagram-edit-avatar" data-action="instagram-pick-avatar">
+                    ${imageMarkup(profile.avatarDataUrl, `${profile.nickname} avatar`, "h-full w-full", "IG")}
+                  </button>
+                  <button type="button" class="instagram-change-photo" data-action="instagram-pick-avatar">Change Profile Photo</button>
+                </div>
+                <div class="instagram-edit-fields">
+                  <label class="instagram-edit-row"><span>Name</span><input type="text" data-role="instagram-profile-nickname" value="${escapeAttribute(profile.nickname)}" /></label>
+                  <label class="instagram-edit-row"><span>Username</span><input type="text" data-role="instagram-profile-username" value="${escapeAttribute(profile.username)}" /></label>
+                  <label class="instagram-edit-row instagram-edit-row--textarea"><span>Bio</span><textarea data-role="instagram-profile-bio">${escapeHtml(profile.bio)}</textarea></label>
+                  <label class="instagram-edit-row"><span>Posts</span><input type="text" data-role="instagram-profile-posts" value="${escapeAttribute(profile.postsCount)}" /></label>
+                  <label class="instagram-edit-row"><span>Followers</span><input type="text" data-role="instagram-profile-followers" value="${escapeAttribute(profile.followers)}" /></label>
+                  <label class="instagram-edit-row"><span>Following</span><input type="text" data-role="instagram-profile-following" value="${escapeAttribute(profile.following)}" /></label>
+                </div>
+              </div>
+            </div>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderInstagramPostView() {
+  const profile = getInstagramProfile();
+  const post = getInstagramPost(appState.instagramSelectedPostId);
+  if (!post) {
+    appState.instagramView = "main";
+    appState.instagramSelectedPostId = "";
+    return renderInstagramProfileTab();
+  }
+
+  return `
+    <div class="instagram-screen-body instagram-post-screen">
+      <div class="instagram-detail-header">
+        <button type="button" class="instagram-icon-button" data-action="instagram-close-post">${iconSvg("back")}</button>
+        <div class="instagram-detail-title">@${escapeHtml(profile.username)}</div>
+        <div class="instagram-detail-spacer"></div>
+      </div>
+      <div class="instagram-detail-card">
+        <div class="instagram-detail-user">@${escapeHtml(profile.username)}</div>
+        <img class="instagram-detail-image" src="${escapeAttribute(assetPath(instagramPostImageSrc(post)))}" alt="${escapeAttribute(post.contextLabel || "Instagram post")}" />
+        <div class="instagram-detail-actions">
+          <div class="instagram-feed-actions-left">
+            <button type="button" class="instagram-icon-button instagram-inline-action">${instagramIconSvg("heart")}</button>
+            <button type="button" class="instagram-icon-button instagram-inline-action">${instagramIconSvg("comment")}</button>
+            <button type="button" class="instagram-icon-button instagram-inline-action">${instagramIconSvg("send")}</button>
+          </div>
+          <button
+            type="button"
+            class="instagram-generate-comments ${appState.instagramGeneratingCommentsPostId === post.id ? "is-loading" : ""}"
+            data-action="instagram-generate-comments"
+            data-post-id="${post.id}"
+          >
+            ${instagramIconSvg("generate")}
+            <span>Generate</span>
+          </button>
+        </div>
+        <div class="instagram-detail-caption">${escapeHtml(post.caption || post.contextLabel || "")}</div>
+        <div class="instagram-comments-list">
+          ${
+            Array.isArray(post.comments) && post.comments.length
+              ? post.comments
+                  .map(
+                    (comment) => `
+                      <div class="instagram-comment-row">
+                        <strong>${escapeHtml(comment.username)}</strong>
+                        <span>${escapeHtml(comment.text)}</span>
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<div class="instagram-comments-empty">No comments yet. Generate a thread for this post.</div>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderInstagramInbox() {
+  const dmDb = getInstagramDmDb();
+  const friends = Object.values(dmDb.friends || {}).map((thread) => {
+    const profile = getProfile(thread.characterId);
+    const last = (thread.messages || [])[thread.messages.length - 1];
+    return {
+      ...thread,
+      avatar: profile?.avatar || "instagram friend profile.png",
+      displayName: thread.username,
+      lastMessage: last?.text || thread.lastMessage || "Send a message",
+      updatedAt: last?.createdAt || thread.updatedAt || Date.now(),
+    };
+  });
+
+  const strangers = Array.isArray(dmDb.strangers) ? dmDb.strangers : [];
+
+  return `
+    <div class="instagram-screen-body instagram-dm-screen">
+      <div class="instagram-detail-header instagram-dm-header">
+        <button type="button" class="instagram-icon-button" data-action="instagram-close-dms">${iconSvg("back")}</button>
+        <div class="instagram-detail-title">${escapeHtml(getInstagramProfile().username)}</div>
+        <button type="button" class="instagram-icon-button">${instagramIconSvg("plus")}</button>
+      </div>
+      <div class="instagram-dm-search"><input type="text" data-role="instagram-search-input" value="${escapeAttribute(appState.instagramSearchQuery)}" placeholder="Search" /></div>
+      <div class="instagram-dm-section">
+        <div class="instagram-dm-section-head"><h3>Friends</h3></div>
+        ${
+          friends
+            .filter((thread) => !appState.instagramSearchQuery || `${thread.displayName} ${thread.lastMessage}`.toLowerCase().includes(appState.instagramSearchQuery.toLowerCase()))
+            .map(
+              (thread) => `
+                <button type="button" class="instagram-dm-row" data-action="instagram-open-dm-thread" data-thread-id="${thread.id}" data-thread-type="friend">
+                  <div class="instagram-dm-avatar">${imageMarkup(thread.avatar, thread.displayName, "h-full w-full", "IG")}</div>
+                  <div class="instagram-dm-copy">
+                    <div class="instagram-dm-name">${escapeHtml(thread.displayName)}</div>
+                    <div class="instagram-dm-snippet">${escapeHtml(thread.lastMessage)}</div>
+                  </div>
+                  <div class="instagram-dm-meta">${formatInstagramRelativeTime(thread.updatedAt)}</div>
+                  <div class="instagram-dm-camera">${instagramIconSvg("camera")}</div>
+                </button>
+              `,
+            )
+            .join("") || `<div class="instagram-comments-empty">No friend threads yet.</div>`
+        }
+      </div>
+      <div class="instagram-dm-section">
+        <div class="instagram-dm-section-head">
+          <h3>Strangers</h3>
+          <button type="button" class="instagram-generate-strangers ${appState.instagramGeneratingStrangers ? "is-loading" : ""}" data-action="instagram-generate-strangers">Generate Strangers</button>
+        </div>
+        ${
+          strangers
+            .filter((thread) => !appState.instagramSearchQuery || `${thread.username} ${thread.lastMessage}`.toLowerCase().includes(appState.instagramSearchQuery.toLowerCase()))
+            .map(
+              (thread) => `
+                <button type="button" class="instagram-dm-row" data-action="instagram-open-dm-thread" data-thread-id="${thread.id}" data-thread-type="stranger">
+                  <div class="instagram-dm-avatar">${createFallback("IG", "")}</div>
+                  <div class="instagram-dm-copy">
+                    <div class="instagram-dm-name">${escapeHtml(thread.username)}</div>
+                    <div class="instagram-dm-snippet">${escapeHtml(thread.lastMessage)}</div>
+                  </div>
+                  <div class="instagram-dm-meta">${formatInstagramRelativeTime(thread.updatedAt || Date.now())}</div>
+                  <div class="instagram-dm-camera">${instagramIconSvg("camera")}</div>
+                </button>
+              `,
+            )
+            .join("") || `<div class="instagram-comments-empty">Generate stranger requests to fill this inbox.</div>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function getInstagramThread() {
+  const dmDb = getInstagramDmDb();
+  if (appState.instagramDmThreadType === "friend") {
+    return dmDb.friends?.[appState.instagramDmThreadId] || null;
+  }
+  return (dmDb.strangers || []).find((entry) => entry.id === appState.instagramDmThreadId) || null;
+}
+
+function renderInstagramDmThread() {
+  const thread = getInstagramThread();
+  if (!thread) {
+    appState.instagramView = "dm-inbox";
+    appState.instagramDmThreadId = "";
+    return renderInstagramInbox();
+  }
+
+  return `
+    <div class="instagram-screen-body instagram-dm-thread-screen">
+      <div class="instagram-detail-header instagram-dm-header">
+        <button type="button" class="instagram-icon-button" data-action="instagram-close-dm-thread">${iconSvg("back")}</button>
+        <div class="instagram-detail-title">${escapeHtml(thread.username)}</div>
+        <button type="button" class="instagram-icon-button">${instagramIconSvg("plus")}</button>
+      </div>
+      <div class="instagram-dm-thread-messages">
+        ${(thread.messages || [])
+          .map(
+            (message) => `
+              <div class="instagram-dm-bubble-row ${message.role === "me" ? "is-me" : ""}">
+                <div class="instagram-dm-bubble">${escapeHtml(message.text)}</div>
+              </div>
+            `,
+          )
+          .join("") || `<div class="instagram-comments-empty">Start the thread.</div>`}
+      </div>
+      <div class="instagram-dm-composer">
+        <input type="text" data-role="instagram-dm-input" value="${escapeAttribute(appState.instagramDmDraft)}" placeholder="Message..." />
+        <button type="button" class="instagram-dm-send" data-action="instagram-send-dm">Send</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderInstagramMainView() {
+  if (appState.instagramView === "post") {
+    return renderInstagramPostView();
+  }
+  if (appState.instagramView === "dm-inbox") {
+    return renderInstagramInbox();
+  }
+  if (appState.instagramView === "dm-thread") {
+    return renderInstagramDmThread();
+  }
+
+  if (appState.instagramTab === "home") return renderInstagramFeedTab();
+  if (appState.instagramTab === "search") {
+    return renderInstagramShellTab(
+      "Search",
+      `<div class="instagram-placeholder-grid instagram-placeholder-grid--search">${Array.from({ length: 12 }, (_, i) => `<div class="instagram-discovery-card">Discovery ${i + 1}</div>`).join("")}</div>`,
+    );
+  }
+  if (appState.instagramTab === "reels") {
+    return renderInstagramShellTab(
+      "Reels",
+      `<div class="instagram-reels-shell">${Array.from({ length: 3 }, (_, i) => `<div class="instagram-reel-card"><div class="instagram-feed-placeholder">Reel placeholder ${i + 1}</div></div>`).join("")}</div>`,
+    );
+  }
+  if (appState.instagramTab === "shop") {
+    return renderInstagramShellTab(
+      "Shop",
+      `<div class="instagram-placeholder-grid">${Array.from({ length: 10 }, (_, i) => `<div class="instagram-shop-card">Shop ${i + 1}</div>`).join("")}</div>`,
+    );
+  }
+  return renderInstagramProfileTab();
+}
+
+function renderInstagramTabBar() {
+  const profile = getInstagramProfile();
+  const tabs = [
+    { id: "home", icon: "home" },
+    { id: "search", icon: "search" },
+    { id: "reels", icon: "reels" },
+    { id: "shop", icon: "shop" },
+    { id: "profile", icon: "profile" },
+  ];
+
+  return `
+    <nav class="instagram-tabbar">
+      ${tabs
+        .map((tab) =>
+          tab.id === "profile"
+            ? `
+              <button type="button" class="instagram-tab-button ${appState.instagramTab === tab.id ? "is-active" : ""}" data-action="instagram-switch-tab" data-tab="${tab.id}">
+                <span class="instagram-tab-avatar">${imageMarkup(profile.avatarDataUrl, profile.nickname, "h-full w-full", "IG")}</span>
+              </button>
+            `
+            : `
+              <button type="button" class="instagram-tab-button ${appState.instagramTab === tab.id ? "is-active" : ""}" data-action="instagram-switch-tab" data-tab="${tab.id}">
+                ${instagramIconSvg(tab.icon)}
+              </button>
+            `,
+        )
+        .join("")}
+    </nav>
+  `;
+}
+
+function renderInstagramScreen() {
+  return `
+    <div class="phone-shell phone-shell--instagram">
+      <div class="shell-inner shell-inner--instagram">
+        ${renderInstagramStatusBar()}
+        <div class="instagram-app">
+          <input type="file" accept="image/*" multiple hidden data-role="instagram-post-upload-input" />
+          <input type="file" accept="image/*" hidden data-role="instagram-avatar-input" />
+          ${renderInstagramMainView()}
+          ${appState.instagramView === "main" ? renderInstagramTabBar() : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateInstagramPost(postId, updater) {
+  const posts = getInstagramPosts().map((post) => (post.id === postId ? updater(post) : post));
+  saveInstagramPosts(posts);
+}
+
+async function generateInstagramFeed() {
+  if (!canUseActiveApiProfile()) {
+    return;
+  }
+  appState.instagramGeneratingFeed = true;
+  render();
+  try {
+    const generated = await requestInstagramFeedPosts();
+    saveSimulatedFeedContent(
+      generated.slice(0, 5).map((item, index) => ({
+        user: String(item.user || `friend_${index + 1}`).trim(),
+        imageDescription: String(item.imageDescription || "A simulated photo").trim(),
+        caption: String(item.caption || "").trim(),
+      })),
+    );
+  } catch (_error) {
+    // Silent fail for now; the user can retry generation.
+  } finally {
+    appState.instagramGeneratingFeed = false;
+    render();
+  }
+}
+
+async function generateInstagramComments(postId) {
+  const post = getInstagramPost(postId);
+  if (!post || !canUseActiveApiProfile()) {
+    return;
+  }
+
+  appState.instagramGeneratingCommentsPostId = postId;
+  render();
+  try {
+    const generated = await requestInstagramComments(post);
+    const characters = instagramFriendUsernames();
+    updateInstagramPost(postId, (entry) => ({
+      ...entry,
+      comments: generated.slice(0, 5).map((comment, index) => {
+        const username = String(comment.username || `user_${index + 1}`).trim();
+        const matchedCharacter = characters.find(
+          (character) =>
+            character.username.toLowerCase() === username.toLowerCase() ||
+            character.name.toLowerCase() === username.toLowerCase(),
+        );
+        return {
+          id: nextInstagramCommentId(),
+          username: matchedCharacter ? matchedCharacter.username : username,
+          text: String(comment.text || "").trim(),
+          authorType: matchedCharacter ? "character" : "generated",
+        };
+      }),
+    }));
+  } catch (_error) {
+    // Silent fail for now.
+  } finally {
+    appState.instagramGeneratingCommentsPostId = "";
+    render();
+  }
+}
+
+async function generateInstagramStrangers() {
+  if (!canUseActiveApiProfile()) {
+    return;
+  }
+
+  appState.instagramGeneratingStrangers = true;
+  render();
+  try {
+    const generated = await requestInstagramStrangerRequests();
+    saveInstagramDmDb({
+      ...getInstagramDmDb(),
+      strangers: generated.slice(0, 10).map((entry, index) => ({
+        id: nextInstagramDmId(),
+        username: String(entry.user || `stranger_${index + 1}`).trim(),
+        bio: String(entry.bio || "A random new follower.").trim(),
+        lastMessage: String(entry.lastMessage || "hey").trim(),
+        requests: true,
+        unfiltered: true,
+        updatedAt: Date.now() - index * 60000,
+        messages: [
+          {
+            id: nextInstagramDmId(),
+            role: "stranger",
+            text: String(entry.lastMessage || "hey").trim(),
+            createdAt: Date.now() - index * 60000,
+          },
+        ],
+      })),
+    });
+  } catch (_error) {
+    // Silent fail for now.
+  } finally {
+    appState.instagramGeneratingStrangers = false;
+    render();
+  }
+}
+
+function openInstagramDmThread(type, threadId) {
+  appState.instagramView = "dm-thread";
+  appState.instagramDmThreadType = type;
+  appState.instagramDmThreadId = threadId;
+  appState.instagramDmDraft = "";
+}
+
+async function sendInstagramDmMessage() {
+  const text = String(appState.instagramDmDraft || "").trim();
+  if (!text) {
+    return;
+  }
+
+  const dmDb = getInstagramDmDb();
+  const createdAt = Date.now();
+  const nextMessage = {
+    id: nextInstagramDmId(),
+    role: "me",
+    text,
+    createdAt,
+  };
+
+  if (appState.instagramDmThreadType === "friend") {
+    const thread = dmDb.friends?.[appState.instagramDmThreadId];
+    if (!thread) {
+      return;
+    }
+    const nextThread = {
+      ...thread,
+      lastMessage: text,
+      updatedAt: createdAt,
+      messages: [...(thread.messages || []), nextMessage],
+    };
+    saveInstagramDmDb({
+      ...dmDb,
+      friends: {
+        ...dmDb.friends,
+        [thread.id]: nextThread,
+      },
+    });
+    appState.instagramDmDraft = "";
+    render();
+    try {
+      const reply = await requestInstagramFriendReply(thread.characterId, nextThread.messages);
+      const freshDb = getInstagramDmDb();
+      const freshThread = freshDb.friends?.[thread.id];
+      if (!freshThread) {
+        return;
+      }
+      saveInstagramDmDb({
+        ...freshDb,
+        friends: {
+          ...freshDb.friends,
+          [thread.id]: {
+            ...freshThread,
+            lastMessage: processAIResponse(reply).text || String(reply).trim(),
+            updatedAt: Date.now(),
+            messages: [
+              ...(freshThread.messages || []),
+              {
+                id: nextInstagramDmId(),
+                role: "friend",
+                text: processAIResponse(reply).text || String(reply).trim(),
+                createdAt: Date.now(),
+              },
+            ],
+          },
+        },
+      });
+    } catch (_error) {
+      // Silent fail for now.
+    }
+    render();
+    return;
+  }
+
+  const strangerThread = (dmDb.strangers || []).find((entry) => entry.id === appState.instagramDmThreadId);
+  if (!strangerThread) {
+    return;
+  }
+
+  const nextStrangerThread = {
+    ...strangerThread,
+    lastMessage: text,
+    updatedAt: createdAt,
+    messages: [...(strangerThread.messages || []), nextMessage],
+  };
+  saveInstagramDmDb({
+    ...dmDb,
+    strangers: (dmDb.strangers || []).map((entry) => (entry.id === strangerThread.id ? nextStrangerThread : entry)),
+  });
+  appState.instagramDmDraft = "";
+  render();
+  try {
+    const reply = await requestInstagramStrangerReply(nextStrangerThread);
+    const freshDb = getInstagramDmDb();
+    saveInstagramDmDb({
+      ...freshDb,
+      strangers: (freshDb.strangers || []).map((entry) =>
+        entry.id === strangerThread.id
+          ? {
+              ...entry,
+              lastMessage: processAIResponse(reply).text || String(reply).trim(),
+              updatedAt: Date.now(),
+              messages: [
+                ...(entry.messages || []),
+                {
+                  id: nextInstagramDmId(),
+                  role: "stranger",
+                  text: processAIResponse(reply).text || String(reply).trim(),
+                  createdAt: Date.now(),
+                },
+              ],
+            }
+          : entry,
+      ),
+    });
+  } catch (_error) {
+    // Silent fail for now.
+  }
+  render();
+}
+
 function renderApp() {
   if (appState.activeScreen === "messages") {
     return renderMessagesScreen();
@@ -5067,6 +6102,10 @@ function renderApp() {
 
   if (appState.activeScreen === "central-settings") {
     return renderCentralSettingsScreen();
+  }
+
+  if (appState.activeScreen === "instagram") {
+    return renderInstagramScreen();
   }
 
   return renderHomeScreen();
@@ -5551,6 +6590,8 @@ function mountFileInputs(root) {
   const momentsBannerInput = root.querySelector("[data-role='moments-banner-input']");
   const momentsAvatarInput = root.querySelector("[data-role='moments-avatar-input']");
   const momentsPostImagesInput = root.querySelector("[data-role='moments-post-images-input']");
+  const instagramPostUploadInput = root.querySelector("[data-role='instagram-post-upload-input']");
+  const instagramAvatarInput = root.querySelector("[data-role='instagram-avatar-input']");
 
   if (wallpaperInput) {
     wallpaperInput.addEventListener("change", async (event) => {
@@ -5678,6 +6719,74 @@ function mountFileInputs(root) {
       appState.momentsDraftImages = [...appState.momentsDraftImages, ...nextImages].slice(0, 9);
       appState.momentsActionMenuOpen = false;
       render();
+    });
+  }
+
+  if (instagramPostUploadInput) {
+    instagramPostUploadInput.addEventListener("change", async (event) => {
+      const files = Array.from(event.target.files || []);
+      if (!files.length) {
+        return;
+      }
+      const currentPosts = getInstagramPosts();
+      const nextPosts = [...currentPosts];
+      for (const file of files) {
+        const dataUrl = await compressImageFile(file, 1600, 0.86);
+        if (!dataUrl) {
+          continue;
+        }
+        nextPosts.unshift({
+          id: nextInstagramPostId(),
+          sourceType: "upload",
+          assetRef: "",
+          imageDataUrl: dataUrl,
+          contextLabel: file.name.replace(/\.[^.]+$/, "") || "Uploaded photo",
+          caption: "",
+          comments: [],
+          likes: 0,
+          createdAt: Date.now() + nextPosts.length,
+        });
+      }
+      saveInstagramPosts(nextPosts);
+      render();
+    });
+  }
+
+  if (instagramAvatarInput) {
+    instagramAvatarInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      saveInstagramProfile({
+        avatarDataUrl: dataUrl,
+      });
+      render();
+    });
+  }
+}
+
+function mountInstagramInputs(root) {
+  const searchInput = root.querySelector("[data-role='instagram-search-input']");
+  const dmInput = root.querySelector("[data-role='instagram-dm-input']");
+
+  if (searchInput) {
+    searchInput.addEventListener("input", (event) => {
+      appState.instagramSearchQuery = event.target.value;
+      render();
+    });
+  }
+
+  if (dmInput) {
+    dmInput.addEventListener("input", (event) => {
+      appState.instagramDmDraft = event.target.value;
+    });
+    dmInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendInstagramDmMessage();
+      }
     });
   }
 }
@@ -5813,6 +6922,119 @@ function handleAction(action, button) {
   if (action === "open-central-settings") {
     openCentralSettings();
     render();
+    return;
+  }
+
+  if (action === "instagram-switch-tab") {
+    appState.instagramTab = button.dataset.tab || "home";
+    appState.instagramView = "main";
+    appState.instagramSelectedPostId = "";
+    appState.instagramEditProfileOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "instagram-open-edit-profile") {
+    appState.instagramEditProfileOpen = true;
+    render();
+    return;
+  }
+
+  if (action === "instagram-close-edit-profile") {
+    appState.instagramEditProfileOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "instagram-save-profile") {
+    const nickname = rootNode?.querySelector("[data-role='instagram-profile-nickname']")?.value || "";
+    const username = rootNode?.querySelector("[data-role='instagram-profile-username']")?.value || "";
+    const bio = rootNode?.querySelector("[data-role='instagram-profile-bio']")?.value || "";
+    const postsCount = rootNode?.querySelector("[data-role='instagram-profile-posts']")?.value || "";
+    const followers = rootNode?.querySelector("[data-role='instagram-profile-followers']")?.value || "";
+    const following = rootNode?.querySelector("[data-role='instagram-profile-following']")?.value || "";
+    saveInstagramProfile({
+      nickname: nickname.trim() || getInstagramProfile().nickname,
+      username: username.trim().replace(/^@+/, "") || getInstagramProfile().username,
+      bio,
+      postsCount: postsCount.trim() || getInstagramProfile().postsCount,
+      followers: followers.trim() || getInstagramProfile().followers,
+      following: following.trim() || getInstagramProfile().following,
+    });
+    appState.instagramEditProfileOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "instagram-upload-post") {
+    rootNode?.querySelector("[data-role='instagram-post-upload-input']")?.click();
+    return;
+  }
+
+  if (action === "instagram-pick-avatar") {
+    rootNode?.querySelector("[data-role='instagram-avatar-input']")?.click();
+    return;
+  }
+
+  if (action === "instagram-open-post") {
+    appState.instagramSelectedPostId = button.dataset.postId || "";
+    appState.instagramView = "post";
+    render();
+    return;
+  }
+
+  if (action === "instagram-close-post") {
+    appState.instagramView = "main";
+    appState.instagramSelectedPostId = "";
+    render();
+    return;
+  }
+
+  if (action === "instagram-open-dms") {
+    appState.instagramView = "dm-inbox";
+    appState.instagramSearchQuery = "";
+    render();
+    return;
+  }
+
+  if (action === "instagram-close-dms") {
+    appState.instagramView = "main";
+    appState.instagramSearchQuery = "";
+    render();
+    return;
+  }
+
+  if (action === "instagram-open-dm-thread") {
+    openInstagramDmThread(button.dataset.threadType || "friend", button.dataset.threadId || "");
+    render();
+    return;
+  }
+
+  if (action === "instagram-close-dm-thread") {
+    appState.instagramView = "dm-inbox";
+    appState.instagramDmThreadId = "";
+    appState.instagramDmDraft = "";
+    render();
+    return;
+  }
+
+  if (action === "instagram-send-dm") {
+    sendInstagramDmMessage();
+    return;
+  }
+
+  if (action === "instagram-generate-feed") {
+    generateInstagramFeed();
+    return;
+  }
+
+  if (action === "instagram-generate-comments") {
+    generateInstagramComments(button.dataset.postId || "");
+    return;
+  }
+
+  if (action === "instagram-generate-strangers") {
+    generateInstagramStrangers();
     return;
   }
 
@@ -6318,6 +7540,12 @@ function wireInteractions(root) {
         return;
       }
 
+      if (appId === "instagram") {
+        enterInstagramApp();
+        render();
+        return;
+      }
+
       console.info(`Mini app placeholder tapped: ${appId}`);
     });
   });
@@ -6339,6 +7567,7 @@ function render() {
   mountImageFallbacks(rootNode);
   wireInteractions(rootNode);
   mountComposer(rootNode);
+  mountInstagramInputs(rootNode);
   mountSettingsInputs(rootNode);
   mountFileInputs(rootNode);
   mountMessageContextMenu(rootNode);
