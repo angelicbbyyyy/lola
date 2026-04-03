@@ -1,6 +1,7 @@
 const ASSET_BASE = "./assets";
 const STORAGE_KEY = "lola_chat_engine_v1";
 const STORAGE_BACKUP_KEY = "lola_chat_engine_v1_backup";
+const MOMENTS_DB_KEY = "moments_db";
 const STORAGE_SNAPSHOT_INDEX_KEY = "lola_chat_engine_v1_snapshots";
 const STORAGE_SNAPSHOT_PREFIX = "lola_chat_engine_v1_snapshot_";
 const STORAGE_COLLECTION_KEYS = {
@@ -55,6 +56,11 @@ const appState = {
   memoryCategoryFilter: "all",
   memorySearchQuery: "",
   storageWarningMessage: "",
+  momentsDraftText: "",
+  momentsDraftLocation: "",
+  momentsDraftImages: [],
+  momentsReplyTarget: null,
+  momentsActionMenuOpen: false,
 };
 
 const automationLocks = new Set();
@@ -325,6 +331,41 @@ function createDefaultPersistedState() {
     stickerPacks: [],
     memories: {},
     conversationArchives: {},
+    momentsDb: {
+      profile: {
+        nickname: "Tuanyuan",
+        avatar: "contacts.JPG",
+        bannerImage: "",
+      },
+      posts: [
+        {
+          id: "seed-moment-1",
+          authorType: "character",
+          characterId: "angel-bunny",
+          authorName: "Angel Bunny",
+          authorAvatar: "contacts.JPG",
+          text: "I leave little thought bubbles here, like a pinned moodboard for our chats.",
+          images: [],
+          location: "",
+          createdAt: Date.now() - 1000 * 60 * 60 * 6,
+          likes: [],
+          comments: [],
+        },
+        {
+          id: "seed-moment-2",
+          authorType: "character",
+          characterId: "angel-bunny",
+          authorName: "Angel Bunny",
+          authorAvatar: "contacts.JPG",
+          text: "Soft sepia, tiny dots, quiet corners. This is where Moments will grow next.",
+          images: [],
+          location: "",
+          createdAt: Date.now() - 1000 * 60 * 60 * 3,
+          likes: [],
+          comments: [],
+        },
+      ],
+    },
   };
 }
 
@@ -561,6 +602,15 @@ function mergeTwoRawSnapshots(primary, backup) {
     },
     conversations: mergeConversationMessageLists(preferred.conversations, fallback.conversations),
     momentsPosts: pickFresherArray(preferred.momentsPosts, fallback.momentsPosts),
+    momentsDb: {
+      ...(fallback.momentsDb || {}),
+      ...(preferred.momentsDb || {}),
+      profile: {
+        ...(fallback.momentsDb?.profile || {}),
+        ...(preferred.momentsDb?.profile || {}),
+      },
+      posts: pickFresherArray(preferred.momentsDb?.posts, fallback.momentsDb?.posts),
+    },
     favoritesLibrary: { ...(fallback.favoritesLibrary || {}), ...(preferred.favoritesLibrary || {}) },
     memories: mergeKeyedArrays(preferred.memories, fallback.memories),
     conversationArchives: mergeKeyedArrays(preferred.conversationArchives, fallback.conversationArchives),
@@ -638,6 +688,7 @@ function normalizePersistedSnapshot(defaults, parsed) {
       parsed.conversationArchives && typeof parsed.conversationArchives === "object"
         ? parsed.conversationArchives
         : defaults.conversationArchives,
+    momentsDb: parsed.momentsDb && typeof parsed.momentsDb === "object" ? parsed.momentsDb : defaults.momentsDb,
   };
 }
 
@@ -658,6 +709,42 @@ function mergeStateWithCollectionMirrors(state, mirrors) {
 
   if (mirrors.conversationArchives?.payload && typeof mirrors.conversationArchives.payload === "object") {
     nextState.conversationArchives = mergeKeyedArrays(mirrors.conversationArchives.payload, nextState.conversationArchives);
+  }
+
+  const mirroredMomentsDb = tryParseStoredJson(window.localStorage.getItem(MOMENTS_DB_KEY));
+  if (mirroredMomentsDb && typeof mirroredMomentsDb === "object") {
+    nextState.momentsDb = {
+      ...(nextState.momentsDb || {}),
+      ...mirroredMomentsDb,
+      profile: {
+        ...(nextState.momentsDb?.profile || {}),
+        ...(mirroredMomentsDb.profile || {}),
+      },
+      posts: pickFresherArray(mirroredMomentsDb.posts, nextState.momentsDb?.posts),
+    };
+  }
+
+  if ((!nextState.momentsDb?.posts || !nextState.momentsDb.posts.length) && Array.isArray(nextState.momentsPosts)) {
+    nextState.momentsDb = {
+      ...(nextState.momentsDb || {}),
+      posts: nextState.momentsPosts.map((post) => ({
+        id: post.id || nextMomentPostId(),
+        authorType: post.generated ? "character" : "user",
+        characterId: post.characterId || "",
+        authorName: post.generated
+          ? nextState.characterProfiles?.[post.characterId || "angel-bunny"]?.name || "Character"
+          : nextState.momentsDb?.profile?.nickname || "You",
+        authorAvatar: post.generated
+          ? nextState.characterProfiles?.[post.characterId || "angel-bunny"]?.avatar || ""
+          : nextState.momentsDb?.profile?.avatar || "",
+        text: post.text || "",
+        images: [],
+        location: "",
+        createdAt: Date.now(),
+        likes: [],
+        comments: [],
+      })),
+    };
   }
 
   return nextState;
@@ -761,6 +848,11 @@ function writeStoragePayload(json) {
       writeCollectionMirrors(parsed);
     } catch (_error) {
       // Collection mirrors are best-effort.
+    }
+    try {
+      window.localStorage.setItem(MOMENTS_DB_KEY, JSON.stringify(parsed.momentsDb || createDefaultPersistedState().momentsDb));
+    } catch (_error) {
+      // Moments DB mirror is best-effort.
     }
   }
 
@@ -895,6 +987,58 @@ function setConversationArchives(characterId, archives) {
     [characterId]: archives,
   };
   saveChatState();
+}
+
+function getMomentsDb() {
+  const fallback = createDefaultPersistedState().momentsDb;
+  if (!persistedState.momentsDb || typeof persistedState.momentsDb !== "object") {
+    persistedState.momentsDb = fallback;
+  }
+  persistedState.momentsDb.profile = {
+    ...fallback.profile,
+    ...(persistedState.momentsDb.profile || {}),
+  };
+  persistedState.momentsDb.posts = Array.isArray(persistedState.momentsDb.posts) ? persistedState.momentsDb.posts : [];
+  return persistedState.momentsDb;
+}
+
+function saveMomentsDb(nextMomentsDb) {
+  persistedState.momentsDb = {
+    ...getMomentsDb(),
+    ...nextMomentsDb,
+    profile: {
+      ...getMomentsDb().profile,
+      ...(nextMomentsDb.profile || {}),
+    },
+    posts: Array.isArray(nextMomentsDb.posts) ? nextMomentsDb.posts : getMomentsDb().posts,
+  };
+  saveChatState();
+}
+
+function nextMomentPostId() {
+  return `moment-post-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function nextMomentCommentId() {
+  return `moment-comment-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function formatMomentStamp(timestamp) {
+  const value = Number(timestamp) || Date.now();
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function momentCommentThread(post, commentId) {
+  const comment = (post.comments || []).find((entry) => entry.id === commentId);
+  if (!comment) {
+    return [];
+  }
+  return [comment, ...(comment.replies || [])];
 }
 
 function normalizeMemoryCategory(rawValue) {
@@ -1362,6 +1506,22 @@ function iconSvg(name) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M9.5 8.5L5.5 12l4 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M6 12h7.2c3.2 0 5.3 1 6.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    `,
+    heart: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20.2l-1.2-1.1C6.1 14.8 3.5 12.5 3.5 9.2A4.2 4.2 0 0 1 7.8 5c1.7 0 3 .8 4.2 2.2C13.2 5.8 14.5 5 16.2 5a4.2 4.2 0 0 1 4.3 4.2c0 3.3-2.6 5.6-7.3 9.9L12 20.2z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      </svg>
+    `,
+    comment: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6.5 7.5h11a4 4 0 0 1 4 4v.5a4 4 0 0 1-4 4h-5.5L7 19l.9-3.2A4 4 0 0 1 3.5 12v-.5a4 4 0 0 1 3-4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+    `,
+    pin: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20s5-5.2 5-9a5 5 0 1 0-10 0c0 3.8 5 9 5 9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        <circle cx="12" cy="11" r="1.8" fill="currentColor"/>
       </svg>
     `,
   };
@@ -2439,17 +2599,245 @@ function resendRequest(messageId) {
 
 function createMomentPost(characterId, text, generated = true) {
   updateProfile(characterId, { lastMomentPostAt: Date.now() });
-  persistedState.momentsPosts = [
-    {
-      id: `moment-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      characterId,
-      text,
-      timestamp: formatLocalTime(),
-      generated,
-    },
-    ...(persistedState.momentsPosts || []),
-  ].slice(0, 24);
-  saveChatState();
+  const profile = getProfile(characterId);
+  const db = getMomentsDb();
+  const nextPost = {
+    id: nextMomentPostId(),
+    authorType: generated ? "character" : "user",
+    characterId,
+    authorName: profile?.name || "Character",
+    authorAvatar: profile?.avatar || "",
+    text,
+    images: [],
+    location: "",
+    createdAt: Date.now(),
+    likes: [],
+    comments: [],
+  };
+  saveMomentsDb({
+    posts: [nextPost, ...db.posts].slice(0, 48),
+  });
+}
+
+function toggleMomentLike(postId) {
+  const db = getMomentsDb();
+  saveMomentsDb({
+    posts: db.posts.map((post) =>
+      post.id === postId
+        ? {
+            ...post,
+            likes: Array.isArray(post.likes) && post.likes.includes("user")
+              ? post.likes.filter((entry) => entry !== "user")
+              : [...(post.likes || []), "user"],
+          }
+        : post,
+    ),
+  });
+}
+
+async function observeMoments(post) {
+  if (!canUseActiveApiProfile()) {
+    return;
+  }
+
+  for (const profile of visibleCharacterProfiles()) {
+    if (!profile.characterPrompt && !profile.worldbook) {
+      continue;
+    }
+
+    try {
+      const result = await executeProfileRequest(getActiveApiProfile(), [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are screening a user's WeChat Moments post for character relevance. If the post fits the character worldbook or would naturally make the character comment, return one short in-character public comment. If not relevant, return NULL.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Character prompt: ${profile.characterPrompt || profile.worldbook || ""}\nMoment post text: ${post.text}\nLocation: ${post.location || "none"}`,
+            },
+          ],
+        },
+      ]);
+
+      if (!result || /^null$/i.test(String(result).trim())) {
+        continue;
+      }
+
+      const commentText = processAIResponse(result).text || String(result).trim();
+      if (!commentText) {
+        continue;
+      }
+
+      const db = getMomentsDb();
+      saveMomentsDb({
+        posts: db.posts.map((entry) =>
+          entry.id === post.id
+            ? {
+                ...entry,
+                comments: [
+                  ...(entry.comments || []),
+                  {
+                    id: nextMomentCommentId(),
+                    authorType: "character",
+                    characterId: profile.id,
+                    authorName: profile.name,
+                    authorAvatar: profile.avatar,
+                    text: commentText,
+                    createdAt: Date.now(),
+                    replies: [],
+                  },
+                ],
+              }
+            : entry,
+        ),
+      });
+    } catch (_error) {
+      // Silent fail for now; posting remains usable without AI comment generation.
+    }
+  }
+}
+
+async function createUserMomentPost() {
+  const text = String(appState.momentsDraftText || "").trim();
+  if (!text && !appState.momentsDraftImages.length) {
+    return;
+  }
+
+  const db = getMomentsDb();
+  const nextPost = {
+    id: nextMomentPostId(),
+    authorType: "user",
+    characterId: "",
+    authorName: db.profile.nickname,
+    authorAvatar: db.profile.avatar,
+    text,
+    images: appState.momentsDraftImages.slice(0, 9),
+    location: appState.momentsDraftLocation,
+    createdAt: Date.now(),
+    likes: [],
+    comments: [],
+  };
+
+  saveMomentsDb({
+    posts: [nextPost, ...db.posts].slice(0, 60),
+  });
+  appState.momentsDraftText = "";
+  appState.momentsDraftLocation = "";
+  appState.momentsDraftImages = [];
+  appState.momentsActionMenuOpen = false;
+  render();
+  observeMoments(nextPost);
+}
+
+async function submitMomentReply(postId) {
+  if (!appState.momentsReplyTarget || appState.momentsReplyTarget.postId !== postId) {
+    return;
+  }
+  const text = String(appState.momentsReplyTarget.text || "").trim();
+  if (!text) {
+    return;
+  }
+
+  const db = getMomentsDb();
+  const posts = db.posts.map((post) => {
+    if (post.id !== postId) {
+      return post;
+    }
+    return {
+      ...post,
+      comments: (post.comments || []).map((comment) =>
+        comment.id === appState.momentsReplyTarget.commentId
+          ? {
+              ...comment,
+              replies: [
+                ...(comment.replies || []),
+                {
+                  id: nextMomentCommentId(),
+                  authorType: "user",
+                  characterId: "",
+                  authorName: db.profile.nickname,
+                  authorAvatar: db.profile.avatar,
+                  text,
+                  createdAt: Date.now(),
+                },
+              ],
+            }
+          : comment,
+      ),
+    };
+  });
+  saveMomentsDb({ posts });
+
+  const post = posts.find((entry) => entry.id === postId);
+  const comment = post?.comments?.find((entry) => entry.id === appState.momentsReplyTarget.commentId);
+  const targetProfile = comment?.characterId ? getProfile(comment.characterId) : null;
+  appState.momentsReplyTarget = null;
+  render();
+
+  if (!targetProfile || !canUseActiveApiProfile()) {
+    return;
+  }
+
+  try {
+    const threadContext = momentCommentThread(post, comment.id)
+      .map((entry) => `${entry.authorType === "user" ? "User" : targetProfile.name}: ${entry.text}`)
+      .join("\n");
+    const reply = await executeProfileRequest(getActiveApiProfile(), [
+      {
+        role: "system",
+        content: [{ type: "input_text", text: "Reply as a character inside a WeChat Moments comment thread. Keep it short and public-facing, but aware of the thread context." }],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: `Character prompt: ${targetProfile.characterPrompt || targetProfile.worldbook || ""}\nThread:\n${threadContext}` }],
+      },
+    ]);
+    const cleanReply = processAIResponse(reply).text || String(reply).trim();
+    if (!cleanReply) {
+      return;
+    }
+    const freshDb = getMomentsDb();
+    saveMomentsDb({
+      posts: freshDb.posts.map((entry) =>
+        entry.id === postId
+          ? {
+              ...entry,
+              comments: (entry.comments || []).map((commentEntry) =>
+                commentEntry.id === comment.id
+                  ? {
+                      ...commentEntry,
+                      replies: [
+                        ...(commentEntry.replies || []),
+                        {
+                          id: nextMomentCommentId(),
+                          authorType: "character",
+                          characterId: targetProfile.id,
+                          authorName: targetProfile.name,
+                          authorAvatar: targetProfile.avatar,
+                          text: cleanReply,
+                          createdAt: Date.now(),
+                        },
+                      ],
+                    }
+                  : commentEntry,
+              ),
+            }
+          : entry,
+      ),
+    });
+    render();
+  } catch (_error) {
+    // Silent fail for thread replies.
+  }
 }
 
 function createBlankApiProfile(name = "") {
@@ -3540,12 +3928,18 @@ function renderCharacterEditorScreen() {
 }
 
 function renderMomentsTab() {
-  const profile = getProfile("angel-bunny");
-  const posts = (persistedState.momentsPosts || []).filter((post) => post.characterId === "angel-bunny");
+  const momentsDb = getMomentsDb();
+  const posts = momentsDb.posts || [];
+  const bannerStyle = momentsDb.profile.bannerImage
+    ? `style="background-image:url('${escapeAttribute(momentsDb.profile.bannerImage)}'); background-size:cover; background-position:center;"`
+    : "";
 
   return `
     <div class="messages-pane messages-pane-moments">
-      <div class="moments-cover">
+      <input type="file" accept="image/*" hidden data-role="moments-banner-input" />
+      <input type="file" accept="image/*" hidden data-role="moments-avatar-input" />
+      <input type="file" accept="image/*" hidden data-role="moments-post-images-input" multiple />
+      <div class="moments-cover ${momentsDb.profile.bannerImage ? "has-banner-image" : ""}" ${bannerStyle} data-role="moments-banner-trigger">
         <button type="button" class="messages-back moments-back" data-action="go-home" aria-label="Back to home">
           ${iconSvg("back")}
         </button>
@@ -3553,26 +3947,162 @@ function renderMomentsTab() {
         <div class="moments-thought">
           <span>I keep soft little notes here, the way a daydream stays pinned.</span>
         </div>
+        <div class="moments-profile-name">${momentsDb.profile.nickname}</div>
         <div class="moments-profile-card">
-          <div class="moments-profile-avatar">
-            ${imageMarkup(profile.avatar, `${profile.name} profile`, "h-full w-full", "AV")}
-          </div>
+          <button type="button" class="moments-profile-avatar" data-action="pick-moments-avatar">
+            ${imageMarkup(momentsDb.profile.avatar, `${momentsDb.profile.nickname} profile`, "h-full w-full", "AV")}
+          </button>
         </div>
       </div>
       <div class="moments-feed">
         <div class="moments-divider">
           <span>${messagesConfig.moments.coverBadge}</span>
         </div>
-        ${posts
-          .map(
-            (post) => `
-              <article class="moment-card" data-post-id="${post.id}">
-                <div class="moment-card-meta">${post.generated ? "Character update" : "Pinned note"} · ${post.timestamp}</div>
-                <p>${post.text}</p>
-              </article>
-            `,
-          )
-          .join("")}
+        <div class="moments-feed-list">
+          ${posts
+            .map(
+              (post) => `
+                <article class="moment-card" data-post-id="${post.id}">
+                  <div class="moment-card-head">
+                    <div class="moment-card-avatar">
+                      ${imageMarkup(post.authorAvatar, `${post.authorName} avatar`, "h-full w-full", "AV")}
+                    </div>
+                    <div class="moment-card-head-copy">
+                      <div class="moment-card-name">${post.authorName}</div>
+                    </div>
+                  </div>
+                  ${post.text ? `<p>${post.text}</p>` : ""}
+                  ${
+                    Array.isArray(post.images) && post.images.length
+                      ? `
+                        <div class="moment-media-grid moment-media-grid--${Math.min(3, post.images.length)}">
+                          ${post.images
+                            .slice(0, 9)
+                            .map(
+                              (image) => `
+                                <div class="moment-media-item">
+                                  <img src="${escapeAttribute(image)}" alt="Moment upload" />
+                                </div>
+                              `,
+                            )
+                            .join("")}
+                        </div>
+                      `
+                      : ""
+                  }
+                  <div class="moment-card-time">${post.location ? `${post.location} · ` : ""}${formatMomentStamp(post.createdAt)}</div>
+                  <div class="moment-interaction-bar">
+                    <button type="button" class="moment-action-button ${Array.isArray(post.likes) && post.likes.includes("user") ? "is-active" : ""}" data-action="toggle-moment-like" data-post-id="${post.id}">
+                      <span>${iconSvg("heart")}</span>
+                      <span>${Array.isArray(post.likes) ? post.likes.length : 0}</span>
+                    </button>
+                    <button type="button" class="moment-action-button" data-action="open-moment-comment" data-post-id="${post.id}">
+                      <span>${iconSvg("comment")}</span>
+                      <span>${(post.comments || []).length}</span>
+                    </button>
+                  </div>
+                  ${
+                    (post.comments || []).length
+                      ? `
+                        <div class="moment-comments">
+                          ${(post.comments || [])
+                            .map(
+                              (comment) => `
+                                <div class="moment-comment ${comment.authorType === "character" ? "is-character" : ""}">
+                                  <button type="button" class="moment-comment-main" ${
+                                    comment.authorType === "character"
+                                      ? `data-action="open-moment-reply" data-post-id="${post.id}" data-comment-id="${comment.id}"`
+                                      : ""
+                                  }>
+                                    <span class="moment-comment-author">${comment.authorName}</span>
+                                    <span class="moment-comment-text">${comment.text}</span>
+                                  </button>
+                                  ${
+                                    Array.isArray(comment.replies) && comment.replies.length
+                                      ? `
+                                        <div class="moment-comment-replies">
+                                          ${comment.replies
+                                            .map(
+                                              (reply) => `
+                                                <div class="moment-comment-reply ${reply.authorType === "character" ? "is-character" : ""}">
+                                                  <span class="moment-comment-author">${reply.authorName}</span>
+                                                  <span class="moment-comment-text">${reply.text}</span>
+                                                </div>
+                                              `,
+                                            )
+                                            .join("")}
+                                        </div>
+                                      `
+                                      : ""
+                                  }
+                                  ${
+                                    appState.momentsReplyTarget?.postId === post.id &&
+                                    appState.momentsReplyTarget?.commentId === comment.id
+                                      ? `
+                                        <div class="moment-reply-composer">
+                                          <input type="text" class="moment-reply-input" data-role="moment-reply-input" value="${escapeAttribute(appState.momentsReplyTarget.text || "")}" placeholder="Reply to ${comment.authorName}" />
+                                          <button type="button" class="moment-reply-send" data-action="submit-moment-reply" data-post-id="${post.id}">Send</button>
+                                        </div>
+                                      `
+                                      : ""
+                                  }
+                                </div>
+                              `,
+                            )
+                            .join("")}
+                        </div>
+                      `
+                      : ""
+                  }
+                </article>
+              `,
+            )
+            .join("")}
+          </div>
+        </div>
+      </div>
+      <div class="moments-composer-wrap">
+        ${
+          appState.momentsActionMenuOpen
+            ? `
+              <div class="moments-action-menu">
+                <button type="button" class="attachment-menu-item" data-action="pick-moments-location">
+                  <span class="attachment-menu-icon">${iconSvg("pin")}</span>
+                  <span>${appState.momentsDraftLocation || "Add location"}</span>
+                </button>
+                <button type="button" class="attachment-menu-item" data-action="pick-moment-images">
+                  <span class="attachment-menu-icon">${iconSvg("image")}</span>
+                  <span>Camera Roll</span>
+                </button>
+              </div>
+            `
+            : ""
+        }
+        ${
+          appState.momentsDraftImages.length
+            ? `
+              <div class="moments-draft-images">
+                ${appState.momentsDraftImages
+                  .slice(0, 9)
+                  .map(
+                    (image) => `
+                      <div class="moments-draft-image">
+                        <img src="${escapeAttribute(image)}" alt="Draft upload" />
+                      </div>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            `
+            : ""
+        }
+        <div class="moments-composer">
+          <input type="text" class="moments-composer-input" data-role="moments-composer-input" value="${escapeAttribute(appState.momentsDraftText)}" placeholder="Share something..." />
+          <button type="button" class="composer-icon-button" data-action="toggle-moments-actions" aria-label="Moments tools">
+            ${iconSvg("plus")}
+          </button>
+          <button type="button" class="moments-post-button" data-action="submit-moment-post">Post</button>
+        </div>
       </div>
     </div>
   `;
@@ -4625,6 +5155,8 @@ function mountSettingsInputs(root) {
   const apiKeyInput = root.querySelector("[data-role='api-key-input']");
   const stickerPackNameInput = root.querySelector("[data-role='sticker-pack-name-input']");
   const memorySearchInput = root.querySelector("[data-role='memory-search-input']");
+  const momentsComposerInput = root.querySelector("[data-role='moments-composer-input']");
+  const momentReplyInput = root.querySelector("[data-role='moment-reply-input']");
 
   if (activeApiProfileSelect) {
     activeApiProfileSelect.addEventListener("change", (event) => {
@@ -4872,6 +5404,33 @@ function mountSettingsInputs(root) {
     });
   }
 
+  if (momentsComposerInput) {
+    momentsComposerInput.addEventListener("input", (event) => {
+      appState.momentsDraftText = event.target.value;
+    });
+    momentsComposerInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        createUserMomentPost();
+      }
+    });
+  }
+
+  if (momentReplyInput) {
+    momentReplyInput.addEventListener("input", (event) => {
+      appState.momentsReplyTarget = {
+        ...(appState.momentsReplyTarget || {}),
+        text: event.target.value,
+      };
+    });
+    momentReplyInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitMomentReply(appState.momentsReplyTarget?.postId || "");
+      }
+    });
+  }
+
   root.querySelectorAll("[data-role='sticker-name-input']").forEach((input) => {
     input.addEventListener("input", (event) => {
       const stickerId = event.target.dataset.stickerId;
@@ -4954,6 +5513,9 @@ function mountFileInputs(root) {
   const attachmentInput = root.querySelector("[data-role='attachment-input']");
   const characterAvatarInput = root.querySelector("[data-role='character-avatar-input']");
   const stickerUploadInput = root.querySelector("[data-role='sticker-upload-input']");
+  const momentsBannerInput = root.querySelector("[data-role='moments-banner-input']");
+  const momentsAvatarInput = root.querySelector("[data-role='moments-avatar-input']");
+  const momentsPostImagesInput = root.querySelector("[data-role='moments-post-images-input']");
 
   if (wallpaperInput) {
     wallpaperInput.addEventListener("change", async (event) => {
@@ -5026,6 +5588,60 @@ function mountFileInputs(root) {
         ...appState.stickerPackDraft,
         stickers: [...(appState.stickerPackDraft.stickers || []), ...nextStickers],
       };
+      render();
+    });
+  }
+
+  if (momentsBannerInput) {
+    momentsBannerInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const dataUrl = await compressImageFile(file);
+      if (!dataUrl) {
+        return;
+      }
+      saveMomentsDb({
+        profile: {
+          bannerImage: dataUrl,
+        },
+      });
+      render();
+    });
+  }
+
+  if (momentsAvatarInput) {
+    momentsAvatarInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      saveMomentsDb({
+        profile: {
+          avatar: dataUrl,
+        },
+      });
+      render();
+    });
+  }
+
+  if (momentsPostImagesInput) {
+    momentsPostImagesInput.addEventListener("change", async (event) => {
+      const files = Array.from(event.target.files || []).slice(0, 9);
+      if (!files.length) {
+        return;
+      }
+      const nextImages = [];
+      for (const file of files) {
+        const dataUrl = await compressImageFile(file, 1400, 0.84);
+        if (dataUrl) {
+          nextImages.push(dataUrl);
+        }
+      }
+      appState.momentsDraftImages = [...appState.momentsDraftImages, ...nextImages].slice(0, 9);
+      appState.momentsActionMenuOpen = false;
       render();
     });
   }
@@ -5107,6 +5723,31 @@ function mountMessageContextMenu(root) {
   );
 }
 
+function mountMomentsInteractions(root) {
+  const banner = root.querySelector("[data-role='moments-banner-trigger']");
+  if (!banner) {
+    return;
+  }
+
+  let timer = null;
+  const clearTimer = () => {
+    if (timer) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  banner.addEventListener("pointerdown", () => {
+    clearTimer();
+    timer = window.setTimeout(() => {
+      root.querySelector("[data-role='moments-banner-input']")?.click();
+    }, 420);
+  });
+  banner.addEventListener("pointerup", clearTimer);
+  banner.addEventListener("pointerleave", clearTimer);
+  banner.addEventListener("pointercancel", clearTimer);
+}
+
 function scrollChatToBottom(root) {
   if (appState.chatView !== "conversation") {
     return;
@@ -5137,6 +5778,62 @@ function handleAction(action, button) {
   if (action === "open-central-settings") {
     openCentralSettings();
     render();
+    return;
+  }
+
+  if (action === "toggle-moments-actions") {
+    appState.momentsActionMenuOpen = !appState.momentsActionMenuOpen;
+    render();
+    return;
+  }
+
+  if (action === "pick-moment-images") {
+    rootNode?.querySelector("[data-role='moments-post-images-input']")?.click();
+    return;
+  }
+
+  if (action === "pick-moments-avatar") {
+    rootNode?.querySelector("[data-role='moments-avatar-input']")?.click();
+    return;
+  }
+
+  if (action === "pick-moments-location") {
+    const nextLocation = window.prompt("Add a location for this Moment:", appState.momentsDraftLocation || "");
+    if (nextLocation !== null) {
+      appState.momentsDraftLocation = nextLocation.trim();
+      render();
+    }
+    return;
+  }
+
+  if (action === "submit-moment-post") {
+    createUserMomentPost();
+    return;
+  }
+
+  if (action === "toggle-moment-like") {
+    toggleMomentLike(button.dataset.postId || "");
+    render();
+    return;
+  }
+
+  if (action === "open-moment-comment" || action === "open-moment-reply") {
+    let commentId = button.dataset.commentId || "";
+    if (!commentId && action === "open-moment-comment") {
+      const post = getMomentsDb().posts.find((entry) => entry.id === (button.dataset.postId || ""));
+      commentId = post?.comments?.find((entry) => entry.authorType === "character")?.id || post?.comments?.[0]?.id || "";
+    }
+    appState.momentsReplyTarget = {
+      postId: button.dataset.postId || "",
+      commentId,
+      text: "",
+    };
+    render();
+    return;
+  }
+
+  if (action === "submit-moment-reply") {
+    submitMomentReply(button.dataset.postId || "");
     return;
   }
 
@@ -5596,6 +6293,7 @@ function render() {
   mountSettingsInputs(rootNode);
   mountFileInputs(rootNode);
   mountMessageContextMenu(rootNode);
+  mountMomentsInteractions(rootNode);
   setStatusTime();
   scrollChatToBottom(rootNode);
 }
