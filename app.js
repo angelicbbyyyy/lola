@@ -727,6 +727,14 @@ function formatElapsedContext(timestamp) {
   }
 
   const diffMinutes = Math.max(1, Math.round((Date.now() - value) / 60000));
+  if (diffMinutes >= 24 * 60) {
+    const days = Math.floor(diffMinutes / (24 * 60));
+    const remainingHours = Math.floor((diffMinutes % (24 * 60)) / 60);
+    if (!remainingHours) {
+      return `It has been about ${days} day${days === 1 ? "" : "s"} since the user last replied.`;
+    }
+    return `It has been about ${days} day${days === 1 ? "" : "s"} and ${remainingHours} hour${remainingHours === 1 ? "" : "s"} since the user last replied.`;
+  }
   if (diffMinutes < 60) {
     return `It has been about ${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} since the user last replied.`;
   }
@@ -1023,8 +1031,9 @@ async function requestGeneratedMomentPost(conversationId) {
   return executeProfileRequest(activeApiProfile, buildAutomationInput(conversationId, "moment"));
 }
 
-function countUnansweredProactiveMessages(conversationId) {
+function countUnansweredProactiveMessages(conversationId, now = Date.now()) {
   const messages = getConversation(conversationId).filter((message) => !message.typing && !message.failed);
+  const last24HoursThreshold = now - 24 * 60 * 60 * 1000;
   let count = 0;
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1032,7 +1041,11 @@ function countUnansweredProactiveMessages(conversationId) {
     if (message.role === "user") {
       break;
     }
-    if (message.role === "ai" && message.metaType === "spontaneous") {
+    if (
+      message.role === "ai" &&
+      message.metaType === "spontaneous" &&
+      (Number(message.createdAt) || 0) >= last24HoursThreshold
+    ) {
       count += 1;
     }
   }
@@ -1044,7 +1057,7 @@ function shouldAllowProactiveReachout(profile, now) {
   const proactiveIntervalMs = normalizeIntervalMinutes(profile.proactiveIntervalMinutes, DEFAULT_PROACTIVE_INTERVAL_MINUTES) * 60 * 1000;
   const lastUserAt = Number(profile.lastUserMessageAt) || 0;
   const lastCharacterAt = Number(profile.lastCharacterMessageAt) || 0;
-  const unansweredCount = countUnansweredProactiveMessages(profile.id);
+  const unansweredCount = countUnansweredProactiveMessages(profile.id, now);
   const anchorTime = lastCharacterAt > lastUserAt ? lastCharacterAt : lastUserAt;
 
   if (!profile.proactiveMessaging || !canUseActiveApiProfile()) {
