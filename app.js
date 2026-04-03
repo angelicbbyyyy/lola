@@ -1034,10 +1034,8 @@ function buildApiRequestConfig(profile, method = "GET", body) {
   if (profile.providerPreset === "anthropic" || profile.requestFormat === "anthropic") {
     headers["x-api-key"] = profile.apiKey;
     headers["anthropic-version"] = "2023-06-01";
-  } else if (profile.providerPreset === "google" && profile.requestFormat === "google-openai") {
-    headers.Authorization = `Bearer ${profile.apiKey}`;
-  } else if (profile.googleAiStudioMode || profile.providerPreset === "google") {
-    headers["x-goog-api-key"] = profile.apiKey;
+  } else if (profile.providerPreset === "google") {
+    // Native Gemini API uses ?key= in the URL — no auth header needed
   } else {
     headers.Authorization = `Bearer ${profile.apiKey}`;
   }
@@ -1089,53 +1087,42 @@ function buildOpenAICompatibleMessages(source) {
   return messages;
 }
 
-function buildGoogleCompatibleMessages(source) {
+function buildNativeGeminiMessages(source) {
   const input = Array.isArray(source) ? source : buildOpenAIInput(source);
   const systemText = input.find((item) => item.role === "system")?.content?.[0]?.text || "";
-  const messages = [];
-
-  if (systemText) {
-    messages.push({ role: "system", content: systemText });
-  }
+  const contents = [];
 
   input
     .filter((item) => item.role !== "system")
     .forEach((item) => {
-      const textParts = item.content
+      const parts = [];
+
+      item.content
         .filter((entry) => entry.type === "input_text" && entry.text)
-        .map((entry) => entry.text.trim())
-        .filter(Boolean);
+        .forEach((entry) => parts.push({ text: entry.text.trim() }));
 
-      const imageParts = item.content.filter((entry) => entry.type === "input_image");
-      const content = textParts.join("\n\n");
-
-      if (imageParts.length) {
-        const contentParts = [];
-        if (content) {
-          contentParts.push({ type: "text", text: content });
-        }
-        imageParts.forEach((entry) => {
-          contentParts.push({
-            type: "image_url",
-            image_url: {
-              url: entry.image_url,
+      item.content
+        .filter((entry) => entry.type === "input_image" && entry.image_url)
+        .forEach((entry) => {
+          const [header, data] = String(entry.image_url || "").split(",");
+          const mimeMatch = header.match(/data:(.*?);base64/);
+          parts.push({
+            inline_data: {
+              mime_type: mimeMatch?.[1] || "image/jpeg",
+              data: data || "",
             },
           });
         });
-        messages.push({
-          role: item.role,
-          content: contentParts,
-        });
-        return;
-      }
 
-      messages.push({
-        role: item.role,
-        content: content || " ",
+      if (!parts.length) return;
+
+      contents.push({
+        role: item.role === "assistant" ? "model" : "user",
+        parts,
       });
     });
 
-  return messages;
+  return { systemText, contents };
 }
 
 function buildAnthropicMessages(source) {
@@ -1220,6 +1207,22 @@ function extractAssistantText(data, profile) {
       .map((item) => item.text.trim())
       .filter(Boolean);
     return textParts.join("\n\n").trim();
+  }
+
+  // Native Gemini API format
+  if (profile.providerPreset === "google" || data.candidates) {
+    const candidate = data.candidates?.[0];
+    if (candidate?.content?.parts) {
+      const text = candidate.content.parts
+        .map((part) => part.text || "")
+        .join("")
+        .trim();
+      if (text) return text;
+    }
+    if (candidate?.finishReason === "SAFETY") {
+      throw new Error("The model declined to respond due to safety settings. Try rephrasing your message.");
+    }
+    if (candidate) return "";
   }
 
   if (typeof data.output_text === "string" && data.output_text.trim()) {
@@ -1314,10 +1317,18 @@ async function executeProfileRequest(profile, sourceInput) {
 
   if (profile.providerPreset === "google") {
     const model = normalizeGoogleModelName(profile.model || "gemini-2.0-flash");
-    endpoint = `${baseUrl}/chat/completions`;
+    const { systemText, contents } = buildNativeGeminiMessages(sourceInput);
+    endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(profile.apiKey)}`;
     requestBody = {
-      model,
-      messages: buildGoogleCompatibleMessages(sourceInput),
+      ...(systemText ? { system_instruction: { parts: [{ text: systemText }] } } : {}),
+      contents,
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+      ],
+      generationConfig: { maxOutputTokens: 1024 },
     };
   } else if (profile.requestFormat === "anthropic" || profile.providerPreset === "anthropic") {
     endpoint = `${baseUrl}/messages`;
