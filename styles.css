@@ -2622,6 +2622,14 @@ button {
   height: 22px;
 }
 
+.instagram-png-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+}
+
 .instagram-icon-button.is-loading {
   opacity: 0.45;
 }
@@ -3042,12 +3050,79 @@ button {
   padding: 0 14px 18px;
 }
 
+.instagram-comment-block {
+  padding-top: 10px;
+}
+
 .instagram-comment-row {
   display: flex;
   gap: 6px;
   font-size: 15px;
   line-height: 1.4;
-  padding-top: 10px;
+  align-items: flex-start;
+}
+
+.instagram-comment-row span {
+  flex: 1;
+}
+
+.instagram-comment-row--reply {
+  padding-top: 8px;
+  font-size: 14px;
+  color: #4f4f4f;
+}
+
+.instagram-comment-replies {
+  margin-left: 18px;
+}
+
+.instagram-comment-reply-button {
+  border: 0;
+  background: transparent;
+  color: #8e8e8e;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+}
+
+.instagram-post-comment-composer {
+  padding: 0 14px 12px;
+  border-top: 1px solid #f1f1f1;
+}
+
+.instagram-post-comment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.instagram-post-comment-row input {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  outline: none;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #efefef;
+  color: #111111;
+  font-size: 15px;
+}
+
+.instagram-reply-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0 8px;
+  color: #6b6b6b;
+  font-size: 13px;
+}
+
+.instagram-reply-pill button {
+  border: 0;
+  background: transparent;
+  color: #8e8e8e;
+  padding: 0;
 }
 
 .instagram-generate-comments,
