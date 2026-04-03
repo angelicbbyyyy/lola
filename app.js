@@ -28,6 +28,11 @@ const appState = {
   isReplyPending: false,
   attachmentMenuOpen: false,
   conversationTimers: [],
+  activeContextMenuMessageId: null,
+  contextMenuAnchor: null,
+  quotedReplyTarget: null,
+  longPressTimer: null,
+  pressedMessageId: null,
   apiConnectionState: {
     status: "idle",
     message: "",
@@ -279,6 +284,7 @@ function createDefaultPersistedState() {
         generated: false,
       },
     ],
+    favoritesLibrary: {},
   };
 }
 
@@ -339,6 +345,7 @@ function loadChatState() {
         ...(parsed.conversations || {}),
       },
       momentsPosts: Array.isArray(parsed.momentsPosts) ? parsed.momentsPosts : defaults.momentsPosts,
+      favoritesLibrary: parsed.favoritesLibrary && typeof parsed.favoritesLibrary === "object" ? parsed.favoritesLibrary : defaults.favoritesLibrary,
     };
   } catch (error) {
     console.warn("Unable to load saved chat state:", error);
@@ -591,6 +598,23 @@ function iconSvg(name) {
         <path d="M5.1 7.1C3.7 8.5 2.8 10 2.8 12c0 0 3.3 5.5 9.2 5.5 1.9 0 3.5-.6 4.8-1.5M9 6.9c1-.3 2-.4 3-.4 5.9 0 9.2 5.5 9.2 5.5a15.8 15.8 0 0 1-2.2 2.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       </svg>
     `,
+    star: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4.6l2.2 4.4 4.8.7-3.5 3.4.8 4.8L12 15.6 7.7 18l.8-4.8L5 9.7l4.8-.7L12 4.6z" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linejoin="round"/>
+      </svg>
+    `,
+    copy: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="8" y="7" width="10" height="12" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M6.5 15.5H6A2.5 2.5 0 0 1 3.5 13V6A2.5 2.5 0 0 1 6 3.5h7A2.5 2.5 0 0 1 15.5 6v.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    `,
+    replyArrow: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9.5 8.5L5.5 12l4 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M6 12h7.2c3.2 0 5.3 1 6.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    `,
   };
 
   return icons[name] || "";
@@ -614,6 +638,10 @@ function createMessage({
   requestPayload = null,
   errorMessage = "",
   metaType = "",
+  isFavorited = false,
+  quotedMessageId = "",
+  quotedMessageText = "",
+  deleting = false,
 }) {
   return {
     id: nextMessageId(),
@@ -630,6 +658,10 @@ function createMessage({
     requestPayload,
     errorMessage,
     metaType,
+    isFavorited,
+    quotedMessageId,
+    quotedMessageText,
+    deleting,
   };
 }
 
@@ -812,6 +844,113 @@ function appendMessage(conversationId, message) {
   }
 }
 
+function getFavoritesForCharacter(characterId) {
+  return Array.isArray(persistedState.favoritesLibrary?.[characterId]) ? persistedState.favoritesLibrary[characterId] : [];
+}
+
+function isMessageFavorited(characterId, messageId) {
+  return getFavoritesForCharacter(characterId).some((entry) => entry.messageId === messageId);
+}
+
+function syncMessageFavoriteState(characterId, messageId, isFavorited) {
+  updateMessage(characterId, messageId, (message) => ({
+    ...message,
+    isFavorited,
+  }));
+}
+
+function clearQuotedMessage() {
+  appState.quotedReplyTarget = null;
+}
+
+function openMessageContextMenu(messageId, anchorRect) {
+  appState.activeContextMenuMessageId = messageId;
+  appState.contextMenuAnchor = anchorRect;
+}
+
+function closeMessageContextMenu() {
+  appState.activeContextMenuMessageId = null;
+  appState.contextMenuAnchor = null;
+}
+
+function toggleFavoriteMessage(conversationId, messageId) {
+  const conversation = getConversation(conversationId);
+  const message = conversation.find((entry) => entry.id === messageId);
+  if (!message) {
+    return;
+  }
+
+  const currentFavorites = getFavoritesForCharacter(conversationId);
+  const alreadyFavorited = currentFavorites.some((entry) => entry.messageId === messageId);
+
+  if (alreadyFavorited) {
+    persistedState.favoritesLibrary[conversationId] = currentFavorites.filter((entry) => entry.messageId !== messageId);
+    syncMessageFavoriteState(conversationId, messageId, false);
+  } else {
+    persistedState.favoritesLibrary[conversationId] = [
+      {
+        characterId: conversationId,
+        messageId,
+        messageText: message.text || "",
+        timestamp: message.timestamp,
+      },
+      ...currentFavorites,
+    ];
+    syncMessageFavoriteState(conversationId, messageId, true);
+  }
+
+  saveChatState();
+}
+
+function selectQuotedMessage(conversationId, messageId) {
+  const message = getConversation(conversationId).find((entry) => entry.id === messageId);
+  if (!message) {
+    return;
+  }
+
+  appState.quotedReplyTarget = {
+    messageId: message.id,
+    text: message.text || "[Image]",
+  };
+}
+
+function removeFavoriteEntry(characterId, messageId) {
+  if (!persistedState.favoritesLibrary?.[characterId]) {
+    return;
+  }
+  persistedState.favoritesLibrary[characterId] = persistedState.favoritesLibrary[characterId].filter((entry) => entry.messageId !== messageId);
+}
+
+function deleteMessage(conversationId, messageId) {
+  updateMessage(conversationId, messageId, (message) => ({
+    ...message,
+    deleting: true,
+  }));
+
+  window.setTimeout(() => {
+    persistedState.conversations[conversationId] = getConversation(conversationId).filter((message) => message.id !== messageId);
+    removeFavoriteEntry(conversationId, messageId);
+    if (appState.quotedReplyTarget?.messageId === messageId) {
+      clearQuotedMessage();
+    }
+    saveChatState();
+    render();
+  }, 180);
+}
+
+async function copyMessageText(conversationId, messageId) {
+  const message = getConversation(conversationId).find((entry) => entry.id === messageId);
+  if (!message?.text) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(message.text);
+  } catch (_error) {
+    // Silent fail for unsupported clipboard environments.
+  }
+}
+
 function updateMessage(conversationId, messageId, updater) {
   updateConversation(conversationId, (messages) =>
     messages.map((message) => (message.id === messageId ? updater(message) : message)),
@@ -940,6 +1079,9 @@ function buildOpenAIInput(conversationId) {
 
   uniqueHistory.forEach((message) => {
     const content = [];
+    if (message.quotedMessageText) {
+      content.push({ type: "input_text", text: `Quoted earlier message for context: "${message.quotedMessageText}"` });
+    }
     if (message.text) {
       content.push({ type: "input_text", text: message.text });
     }
@@ -1143,6 +1285,8 @@ async function sendMessage(conversationId, draft = appState.draftMessage, attach
       text: trimmedText,
       imageDataUrl: attachment?.dataUrl || "",
       imageName: attachment?.name || "",
+      quotedMessageId: appState.quotedReplyTarget?.messageId || "",
+      quotedMessageText: appState.quotedReplyTarget?.text || "",
     };
 
     const outgoingMessage = createMessage({
@@ -1154,12 +1298,16 @@ async function sendMessage(conversationId, draft = appState.draftMessage, attach
       attempts: 1,
       requestPayload: outgoingPayload,
       metaType: "user",
+      quotedMessageId: outgoingPayload.quotedMessageId,
+      quotedMessageText: outgoingPayload.quotedMessageText,
     });
 
     appendMessage(conversationId, outgoingMessage);
     targetMessageId = outgoingMessage.id;
     appState.draftMessage = "";
     appState.pendingAttachment = null;
+    clearQuotedMessage();
+    closeMessageContextMenu();
     render();
   } else {
     updateMessage(conversationId, retryMessageId, (message) => ({
@@ -2386,6 +2534,7 @@ function renderMessage(conversationId, message) {
   }
 
   const isUser = message.role === "user";
+  const isFavorited = message.isFavorited || isMessageFavorited(conversationId, message.id);
   const metaText = message.failed ? "Failed" : message.status === "read" ? "Read" : "Sent";
   const errorDetail = message.failed && message.errorMessage
     ? `<div class="message-error-detail">${message.errorMessage}</div>`
@@ -2412,8 +2561,20 @@ function renderMessage(conversationId, message) {
     `
     : "";
 
+  const quotedBlock = message.quotedMessageText
+    ? `
+      <div class="message-quoted-block">
+        <span>${message.quotedMessageText}</span>
+      </div>
+    `
+    : "";
+
+  const favoriteBadge = !isUser
+    ? `<button type="button" class="message-favorite-badge ${isFavorited ? "is-active" : ""}" data-action="toggle-favorite-message" data-message-id="${message.id}" aria-label="${isFavorited ? "Unfavorite message" : "Favorite message"}">${iconSvg("star")}</button>`
+    : "";
+
   return `
-    <div class="message-row ${isUser ? "message-row--user" : "message-row--ai"}">
+    <div class="message-row ${isUser ? "message-row--user" : "message-row--ai"} ${message.deleting ? "is-deleting" : ""}">
       ${
         isUser
           ? `
@@ -2424,6 +2585,7 @@ function renderMessage(conversationId, message) {
               </div>
               ${errorDetail}
               <div class="message-bubble message-bubble--user">
+                ${quotedBlock}
                 ${imageBlock}
                 ${message.text ? `<p>${message.text}</p>` : ""}
               </div>
@@ -2437,9 +2599,13 @@ function renderMessage(conversationId, message) {
               ${imageMarkup(profile.avatar, `${profile.name} avatar`, "h-full w-full", "AV")}
             </div>
             <div class="message-stack">
-              <div class="message-bubble message-bubble--ai">
-                ${imageBlock}
-                ${message.text ? `<p>${message.text}</p>` : ""}
+              <div class="message-bubble-shell">
+                <div class="message-bubble message-bubble--ai" data-message-bubble="${message.id}">
+                  ${quotedBlock}
+                  ${imageBlock}
+                  ${message.text ? `<p>${message.text}</p>` : ""}
+                </div>
+                ${favoriteBadge}
               </div>
               <div class="message-meta">
                 <span>${message.timestamp}</span>
@@ -2463,6 +2629,52 @@ function renderAttachmentPreview() {
         <span>${appState.pendingAttachment.name}</span>
         <button type="button" class="pending-attachment-remove" data-action="clear-attachment" aria-label="Remove attachment">×</button>
       </div>
+    </div>
+  `;
+}
+
+function renderQuotedReplyBar() {
+  if (!appState.quotedReplyTarget) {
+    return "";
+  }
+
+  return `
+    <div class="quoted-reply-bar">
+      <div class="quoted-reply-copy">
+        <span class="quoted-reply-label">Replying to</span>
+        <span class="quoted-reply-text">${appState.quotedReplyTarget.text}</span>
+      </div>
+      <button type="button" class="quoted-reply-close" data-action="clear-quoted-message" aria-label="Cancel quoted reply">×</button>
+    </div>
+  `;
+}
+
+function renderMessageContextMenu(conversationId) {
+  const messageId = appState.activeContextMenuMessageId;
+  const anchor = appState.contextMenuAnchor;
+  if (!messageId || !anchor) {
+    return "";
+  }
+
+  const isFavorited = isMessageFavorited(conversationId, messageId);
+  return `
+    <div class="message-context-menu" style="top:${anchor.top}px; left:${anchor.left}px;" data-role="message-context-menu">
+      <button type="button" class="message-context-item" data-action="toggle-favorite-message" data-message-id="${messageId}">
+        <span class="message-context-icon ${isFavorited ? "is-active" : ""}">${iconSvg("star")}</span>
+        <span>Favorite</span>
+      </button>
+      <button type="button" class="message-context-item" data-action="quote-message" data-message-id="${messageId}">
+        <span class="message-context-icon">${iconSvg("replyArrow")}</span>
+        <span>Quote / Reply</span>
+      </button>
+      <button type="button" class="message-context-item" data-action="copy-message" data-message-id="${messageId}">
+        <span class="message-context-icon">${iconSvg("copy")}</span>
+        <span>Copy</span>
+      </button>
+      <button type="button" class="message-context-item is-destructive" data-action="delete-message" data-message-id="${messageId}">
+        <span class="message-context-icon">${iconSvg("delete")}</span>
+        <span>Delete</span>
+      </button>
     </div>
   `;
 }
@@ -2660,6 +2872,7 @@ function renderChatComposer(conversationId) {
 
   return `
     <div class="chat-composer-wrap">
+      ${renderQuotedReplyBar()}
       ${renderAttachmentPreview()}
       ${renderAttachmentMenu()}
       <div class="chat-composer ${disabled ? "is-disabled" : ""}">
@@ -2751,6 +2964,7 @@ function renderChatScreen() {
               <div class="chat-scroll" data-role="chat-scroll">
                 ${getConversation(conversationId).map((message) => renderMessage(conversationId, message)).join("")}
               </div>
+              ${renderMessageContextMenu(conversationId)}
             </div>
             ${renderChatComposer(conversationId)}
           `
@@ -3252,6 +3466,77 @@ function mountFileInputs(root) {
   }
 }
 
+function clearLongPressState() {
+  if (appState.longPressTimer) {
+    window.clearTimeout(appState.longPressTimer);
+  }
+  appState.longPressTimer = null;
+  appState.pressedMessageId = null;
+}
+
+function mountMessageContextMenu(root) {
+  const bubbles = root.querySelectorAll("[data-message-bubble]");
+
+  bubbles.forEach((bubble) => {
+    const messageId = bubble.getAttribute("data-message-bubble");
+    if (!messageId) {
+      return;
+    }
+
+    const openMenu = () => {
+      const rect = bubble.getBoundingClientRect();
+      const appRect = root.getBoundingClientRect();
+      openMessageContextMenu(messageId, {
+        top: Math.max(10, rect.top - appRect.top - 12),
+        left: Math.max(12, Math.min(rect.left - appRect.left, appRect.width - 220)),
+      });
+      render();
+    };
+
+    bubble.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openMenu();
+    });
+
+    bubble.addEventListener("pointerdown", () => {
+      clearLongPressState();
+      appState.pressedMessageId = messageId;
+      appState.longPressTimer = window.setTimeout(() => {
+        if (appState.pressedMessageId === messageId) {
+          openMenu();
+        }
+      }, 420);
+    });
+
+    bubble.addEventListener("pointerup", clearLongPressState);
+    bubble.addEventListener("pointerleave", clearLongPressState);
+    bubble.addEventListener("pointercancel", clearLongPressState);
+  });
+
+  const chatScroll = root.querySelector("[data-role='chat-scroll']");
+  chatScroll?.addEventListener("scroll", () => {
+    if (appState.activeContextMenuMessageId) {
+      closeMessageContextMenu();
+      render();
+    }
+  });
+
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const menu = root.querySelector("[data-role='message-context-menu']");
+      if (!menu || menu.contains(event.target)) {
+        return;
+      }
+      if (appState.activeContextMenuMessageId) {
+        closeMessageContextMenu();
+        render();
+      }
+    },
+    { once: true },
+  );
+}
+
 function scrollChatToBottom(root) {
   if (appState.chatView !== "conversation") {
     return;
@@ -3375,6 +3660,40 @@ function handleAction(action, button) {
 
   if (action === "retry-message") {
     resendRequest(button.dataset.messageId);
+    return;
+  }
+
+  if (action === "toggle-favorite-message") {
+    toggleFavoriteMessage(currentConversationId(), button.dataset.messageId);
+    closeMessageContextMenu();
+    render();
+    return;
+  }
+
+  if (action === "quote-message") {
+    selectQuotedMessage(currentConversationId(), button.dataset.messageId);
+    closeMessageContextMenu();
+    render();
+    return;
+  }
+
+  if (action === "clear-quoted-message") {
+    clearQuotedMessage();
+    render();
+    return;
+  }
+
+  if (action === "delete-message") {
+    closeMessageContextMenu();
+    deleteMessage(currentConversationId(), button.dataset.messageId);
+    render();
+    return;
+  }
+
+  if (action === "copy-message") {
+    copyMessageText(currentConversationId(), button.dataset.messageId);
+    closeMessageContextMenu();
+    render();
     return;
   }
 
@@ -3560,6 +3879,7 @@ function render() {
   mountComposer(rootNode);
   mountSettingsInputs(rootNode);
   mountFileInputs(rootNode);
+  mountMessageContextMenu(rootNode);
   setStatusTime();
   scrollChatToBottom(rootNode);
 }
