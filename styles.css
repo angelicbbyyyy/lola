@@ -1219,10 +1219,12 @@ button {
 }
 
 .messages-chat-view {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow: visible;
 }
 
 .chat-surface {

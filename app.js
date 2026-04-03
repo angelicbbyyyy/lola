@@ -2973,9 +2973,9 @@ function renderChatScreen() {
               <div class="chat-scroll" data-role="chat-scroll">
                 ${getConversation(conversationId).map((message) => renderMessage(conversationId, message)).join("")}
               </div>
-              ${renderMessageContextMenu(conversationId)}
             </div>
             ${renderChatComposer(conversationId)}
+            ${renderMessageContextMenu(conversationId)}
           `
       }
     </div>
@@ -3494,10 +3494,15 @@ function mountMessageContextMenu(root) {
 
     const openMenu = () => {
       const rect = bubble.getBoundingClientRect();
-      const appRect = root.getBoundingClientRect();
+      const chatView = root.querySelector(".messages-chat-view");
+      const appRect = (chatView || root).getBoundingClientRect();
+      const estimatedMenuHeight = 192;
+      const estimatedMenuWidth = 208;
+      const preferredTop = rect.top - appRect.top - estimatedMenuHeight - 10;
+      const fallbackTop = rect.bottom - appRect.top + 8;
       openMessageContextMenu(messageId, {
-        top: Math.max(10, rect.top - appRect.top - 12),
-        left: Math.max(12, Math.min(rect.left - appRect.left, appRect.width - 220)),
+        top: preferredTop >= 8 ? preferredTop : Math.max(8, fallbackTop),
+        left: Math.max(12, Math.min(rect.left - appRect.left, appRect.width - estimatedMenuWidth - 12)),
       });
       render();
     };
