@@ -2561,7 +2561,7 @@ function renderChatScreen() {
             <input type="file" accept="image/*" hidden data-role="wallpaper-input" />
             <input type="file" accept="image/*" hidden data-role="attachment-input" />
             ${renderChatHeader(conversationId)}
-            <div class="chat-surface" ${wallpaperStyle}>
+            <div class="chat-surface${profile.chatWallpaper ? " has-wallpaper" : ""}" ${wallpaperStyle}>
               <div class="chat-scroll" data-role="chat-scroll">
                 ${getConversation(conversationId).map((message) => renderMessage(conversationId, message)).join("")}
               </div>
@@ -2662,6 +2662,30 @@ function readFileAsDataUrl(file) {
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
+  });
+}
+
+function compressImageFile(file, maxDim = 1200, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      // Fall back to raw data URL if canvas fails
+      readFileAsDataUrl(file).then(resolve).catch(() => resolve(null));
+    };
+    img.src = objectUrl;
   });
 }
 
@@ -2991,8 +3015,10 @@ function mountFileInputs(root) {
         return;
       }
 
-      const dataUrl = await readFileAsDataUrl(file);
-      updateProfile(currentConversationId(), { chatWallpaper: dataUrl });
+      const dataUrl = await compressImageFile(file);
+      if (dataUrl) {
+        updateProfile(currentConversationId(), { chatWallpaper: dataUrl });
+      }
       render();
     });
   }

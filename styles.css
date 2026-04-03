@@ -1094,6 +1094,24 @@ button {
   pointer-events: none;
 }
 
+.chat-surface.has-wallpaper::before {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.chat-surface.has-wallpaper .message-bubble--ai {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+}
+
+.chat-surface.has-wallpaper .message-bubble--user {
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+}
+
+.chat-surface.has-wallpaper .message-bubble--user::after {
+  background: rgba(255, 255, 255, 0.88);
+}
+
 .chat-header {
   display: flex;
   align-items: center;
