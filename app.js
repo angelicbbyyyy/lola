@@ -2517,11 +2517,12 @@ function buildOpenAIInput(conversationId) {
   }
   const memoryInjection = injectMemoryContext(conversationId);
   const characterPrompt = profile.characterPrompt || profile.worldbook || "";
-  const promptSections = [FIXED_CHARACTER_SYSTEM_PROMPT];
+  const promptSections = [];
   if (profile.useGlobalWordbook && persistedState.appSettings.globalWordbook?.trim()) {
     promptSections.push(persistedState.appSettings.globalWordbook.trim());
   }
   promptSections.push(characterPrompt);
+  promptSections.push(FIXED_CHARACTER_SYSTEM_PROMPT);
   if (memoryInjection) {
     promptSections.push(memoryInjection);
   }
